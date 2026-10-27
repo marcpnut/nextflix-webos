@@ -29,7 +29,7 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 - Show a featured title and poster rows on Home; open title details before playback.
 - Save movies and series to a local My List.
 - Hide and restore provider categories; hidden categories are excluded from browsing, Home, and search.
-- Filter Live TV, Movies, Series, and Settings by language codes at the start of category names, before `|`; show only language tags actually present for each catalog, with flag emoji where supported. The language filter is hidden on Home.
+- Filter Live TV, Movies, Series, and Settings by language codes in category names (`NL/PL | ...` or `|NL| ...`); show only language tags actually present for each catalog, with flag emoji where supported. The language filter is hidden on Home.
 - Navigate with directional remote keys and get focus return when closing title details.
 - Require three Back presses on Home before showing the exit confirmation; Back closes the player or returns to Home from a subpage.
 

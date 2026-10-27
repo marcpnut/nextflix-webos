@@ -381,7 +381,9 @@ const LANGUAGE_LABELS: Record<string, string> = {
 
 function languageTags(categoryName: string | undefined): string[] {
   if (!categoryName || categoryName.indexOf('|') < 0) return [];
-  const prefix = categoryName.split('|')[0].trim().toUpperCase();
+  const segments = categoryName.trim().split('|');
+  const tagSegment = segments[0].trim() ? segments[0] : segments[1] ?? '';
+  const prefix = tagSegment.trim().toUpperCase();
   const leadingTags = prefix.match(/^(?:MULTI|[A-Z]{2})(?=$|[\s/,;+&-])(?:\s*[/,+&]\s*(?:MULTI|[A-Z]{2})(?=$|[\s/,;+&-]))*/);
   if (!leadingTags) return [];
   const ignored = new Set(['HD', 'SD', 'TV', 'IP', '4K', 'VOD']);
