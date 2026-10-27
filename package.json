@@ -1,9 +1,10 @@
 {
   "name": "nextflix-webos",
-  "version": "0.1.4",
+  "version": "0.1.6",
   "private": true,
   "description": "A lightweight Xtream live TV player for LG webOS",
   "scripts": {
+    "dev": "vite --host 127.0.0.1",
     "build": "tsc -p tsconfig.json && vite build",
     "package": "pnpm build && ares-package dist -o packages"
   },

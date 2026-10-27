@@ -22,16 +22,14 @@
             <label>Server URL<input id="server" type="url" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://provider.example:8080" required /></label>
             <div class="credentials">
               <label>Username<input id="username" type="text" inputmode="text" autocapitalize="off" spellcheck="false" autocomplete="off" required /></label>
-              <div class="password-control"><label for="password">Password</label>
-                <span class="password-field"><input id="password" type="password" autocomplete="new-password" required /><button id="toggle-password" class="password-toggle" type="button" aria-label="Show password" aria-pressed="false">Show</button></span>
-              </div>
+              <label>Password<input id="password" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" required /></label>
             </div>
             <label class="remember-label"><input id="remember-provider" type="checkbox" checked /> Remember this login on this TV</label>
             <div class="actions">
               <button id="save-provider-button" type="button">Save login</button>
               <button id="connect-button" class="primary" type="submit">Connect and load channels</button>
               <label class="format-label">Live format
-                <select id="format"><option value="ts">MPEG-TS (.ts)</option><option value="m3u8">HLS (.m3u8)</option></select>
+                <select id="format"><option value="auto">Provider default (recommended)</option><option value="ts">MPEG-TS (.ts)</option><option value="m3u8">HLS (.m3u8)</option></select>
               </label>
             </div>
           </form>
@@ -51,6 +49,7 @@
               <button id="disconnect-button" class="quiet">Disconnect</button>
             </div>
           </div>
+          <div id="library-message" class="message hidden" role="status" aria-live="polite"></div>
           <div id="channel-list" class="channel-list" role="list"></div>
           <button id="more-button" class="more-button hidden">Load more channels</button>
         </section>
