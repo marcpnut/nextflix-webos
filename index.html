@@ -19,8 +19,9 @@
           <h1>Watch your channels</h1>
           <p class="muted">Connect to an IPTV provider you are authorized to use.</p>
           <form id="connect-form" autocomplete="off">
-            <label>Server URL<input id="server" type="url" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://provider.example:8080" required /></label>
-            <div class="credentials">
+            <label>Source type<select id="provider-type"><option value="xtream">Xtream Codes</option><option value="m3u">M3U playlist URL</option></select></label>
+            <label><span id="server-label">Server URL</span><input id="server" type="url" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://provider.example:8080" required /></label>
+            <div id="credentials-fields" class="credentials">
               <label>Username<input id="username" type="text" inputmode="text" autocapitalize="off" spellcheck="false" autocomplete="off" required /></label>
               <label>Password<input id="password" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" required /></label>
             </div>
@@ -34,18 +35,21 @@
             </div>
           </form>
           <div id="message" class="message" role="status" aria-live="polite"></div>
-          <p id="app-version" class="privacy-note">NextFlix 0.1.9 · waiting for app script</p>
+          <p id="app-version" class="privacy-note">NextFlix 0.2.1 · waiting for app script</p>
           <p class="privacy-note">When enabled, login details are saved in this app’s local storage on the TV. They are not encrypted or sent to NextFlix. They are sent to your IPTV provider when connecting and streaming.</p>
         </section>
 
         <section id="library" class="library hidden" aria-label="Live channels">
           <div class="library-heading">
             <div>
-              <div class="eyebrow">LIVE TV</div>
-              <h1>Channels</h1>
+              <div class="eyebrow">CATALOG</div>
+              <h1 id="catalog-title">Live TV</h1>
             </div>
             <div class="library-actions">
+              <label class="filter-label">Browse<select id="catalog-type"><option value="live">Live TV</option><option value="movies">Movies</option><option value="series">Series</option></select></label>
+              <label class="search-label">Search<input id="catalog-search" type="search" placeholder="Search titles" autocomplete="off" /></label>
               <label class="filter-label">Category<select id="category"><option value="all">All categories</option></select></label>
+              <button id="back-to-series" class="quiet hidden">Back to series</button>
               <button id="disconnect-button" class="quiet">Disconnect</button>
             </div>
           </div>

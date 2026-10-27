@@ -1,5 +1,14 @@
 import './style.css';
-import { readCatalog, writeCatalog, type CachedCatalog, type CatalogCategory as Category, type CatalogChannel as Channel } from './catalogCache';
+import {
+  readCatalog,
+  writeCatalog,
+  type CachedCatalog,
+  type CatalogCategory as Category,
+  type CatalogChannel as Channel,
+  type CatalogMovie as Movie,
+  type CatalogSeries as Series,
+  type SeriesEpisode
+} from './catalogCache';
 
 type XtreamAuth = {
   user_info?: { auth?: number; status?: string; exp_date?: string | null; allowed_output_formats?: string[] };
@@ -7,6 +16,7 @@ type XtreamAuth = {
 };
 
 type LiveFormat = 'auto' | 'ts' | 'm3u8';
+type CatalogView = 'live' | 'movies' | 'series';
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -16,6 +26,9 @@ const $ = <T extends HTMLElement>(id: string): T => {
 
 const form = $('connect-form') as HTMLFormElement;
 const serverInput = $('server') as HTMLInputElement;
+const providerTypeSelect = $('provider-type') as HTMLSelectElement;
+const serverLabel = $('server-label');
+const credentialFields = $('credentials-fields');
 const usernameInput = $('username') as HTMLInputElement;
 const passwordInput = $('password') as HTMLInputElement;
 const rememberProviderInput = $('remember-provider') as HTMLInputElement;
@@ -28,6 +41,10 @@ const setupSection = $('setup');
 const librarySection = $('library');
 const categorySelect = $('category') as HTMLSelectElement;
 const channelList = $('channel-list');
+const catalogTitle = $('catalog-title');
+const catalogTypeSelect = $('catalog-type') as HTMLSelectElement;
+const searchInput = $('catalog-search') as HTMLInputElement;
+const backToSeriesButton = $('back-to-series') as HTMLButtonElement;
 const moreButton = $('more-button') as HTMLButtonElement;
 const libraryMessage = $('library-message');
 const playerLayer = $('player');
@@ -39,16 +56,25 @@ const playPauseButton = $('play-pause') as HTMLButtonElement;
 const PAGE_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.1.9';
+const APP_VERSION = '0.2.1';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
-type SavedProvider = { base: string; username: string; password: string; format: LiveFormat };
+type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
 let credentials: { base: string; username: string; password: string } | null = null;
 let playbackBase: string | null = null;
 let allowedLiveFormats: string[] = [];
 let activeLiveFormat: string | null = null;
 let categories: Category[] = [];
 let channels: Channel[] = [];
+let movieCategories: Category[] = [];
+let movies: Movie[] = [];
+let seriesCategories: Category[] = [];
+let series: Series[] = [];
+let seriesEpisodes: SeriesEpisode[] = [];
+let activeSeries: Series | null = null;
+let catalogView: CatalogView = 'live';
+let searchTimer = 0;
+let sourceType: 'xtream' | 'm3u' = 'xtream';
 let visibleChannels: Channel[] = [];
 let renderedCount = 0;
 let selectedChannel: Channel | null = null;
@@ -88,7 +114,8 @@ function readSavedProvider(): SavedProvider | null {
       base: saved.base,
       username: saved.username,
       password: saved.password,
-      format: saved.format === 'm3u8' || saved.format === 'auto' ? saved.format : 'ts'
+      format: saved.format === 'm3u8' || saved.format === 'auto' ? saved.format : 'ts',
+      kind: saved.kind === 'm3u' ? 'm3u' : 'xtream'
     };
   } catch {
     return null;
@@ -110,8 +137,8 @@ function saveCurrentProvider(): boolean {
     const base = normalizedBase(serverInput.value);
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
-    if (!username || !password) throw new Error('Enter the URL, username, and password before saving.');
-    const saved = { base, username, password, format: formatInput.value as LiveFormat };
+    if (providerTypeSelect.value === 'xtream' && (!username || !password)) throw new Error('Enter the URL, username, and password before saving.');
+    const saved = { base, username, password, format: formatInput.value as LiveFormat, kind: providerTypeSelect.value === 'm3u' ? 'm3u' as const : 'xtream' as const };
     if (!saveProvider(saved)) throw new Error('TV storage did not confirm the saved login.');
     rememberProviderInput.checked = true;
     setMessage('Login saved on this TV.');
@@ -120,6 +147,15 @@ function saveCurrentProvider(): boolean {
     setMessage(error instanceof Error ? error.message : 'Could not save the login.', true);
     return false;
   }
+}
+
+function updateSourceTypeControls(): void {
+  const playlist = providerTypeSelect.value === 'm3u';
+  credentialFields.classList.toggle('hidden', playlist);
+  usernameInput.required = !playlist;
+  passwordInput.required = !playlist;
+  serverLabel.textContent = playlist ? 'M3U playlist URL' : 'Server URL';
+  serverInput.placeholder = playlist ? 'https://provider.example/playlist.m3u' : 'https://provider.example:8080';
 }
 
 function forgetProvider(): void {
@@ -173,6 +209,75 @@ function catalogKey(base: string, username: string): string {
   return `${new URL(base).origin}${new URL(base).pathname}|${username}`;
 }
 
+function m3uCatalogKey(url: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < url.length; index += 1) {
+    hash ^= url.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `m3u:${(hash >>> 0).toString(16)}`;
+}
+
+function parseM3U(text: string): { channels: Channel[]; categories: Category[] } {
+  const channels: Channel[] = [];
+  const categoryIds = new Map<string, number>();
+  let pending: { title?: string; tvgId?: string; logo?: string; group?: string } | null = null;
+  for (const rawLine of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith('#EXTINF')) {
+      const attr = (name: string): string | undefined => {
+        const match = line.match(new RegExp(`(?:^|\\s)${name}="([^"]*)"`, 'i'));
+        return match?.[1];
+      };
+      const comma = line.lastIndexOf(',');
+      pending = {
+        title: attr('tvg-name') || (comma >= 0 ? line.slice(comma + 1).trim() : undefined),
+        tvgId: attr('tvg-id'),
+        logo: attr('tvg-logo'),
+        group: attr('group-title') || 'Other'
+      };
+    } else if (!line.startsWith('#') && pending) {
+      let categoryId = categoryIds.get(pending.group ?? 'Other');
+      if (categoryId === undefined) {
+        categoryId = categoryIds.size + 1;
+        categoryIds.set(pending.group ?? 'Other', categoryId);
+      }
+      channels.push({
+        num: channels.length + 1,
+        stream_id: channels.length + 1,
+        stream_url: line,
+        name: pending.title || line,
+        stream_icon: pending.logo,
+        category_id: categoryId,
+        epg_channel_id: pending.tvgId
+      });
+      pending = null;
+    }
+  }
+  const categories = Array.from(categoryIds.entries()).map(([category_name, category_id]) => ({ category_id, category_name }));
+  return { channels, categories };
+}
+
+async function fetchM3U(url: string): Promise<string> {
+  requestController?.abort();
+  const controller = new AbortController();
+  requestController = controller;
+  const timeout = window.setTimeout(() => controller.abort(), 180_000);
+  try {
+    const response = await fetch(url, { headers: { Accept: 'audio/x-mpegurl, application/vnd.apple.mpegurl, text/plain, */*' }, signal: controller.signal, cache: 'no-store' });
+    if (!response.ok) throw new Error(`Playlist returned HTTP ${response.status}.`);
+    return await response.text();
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith('Playlist returned')) throw error;
+    if (controller.signal.aborted) throw new Error('The playlist request timed out.');
+    throw new Error('Could not download the M3U playlist. Check its URL, network access, TLS, and browser CORS support.');
+  } finally {
+    window.clearTimeout(timeout);
+    if (requestController === controller) requestController = null;
+  }
+}
+
 function providerPlaybackServer(auth: XtreamAuth, enteredBase: string): string {
   const server = auth.server_info;
   if (!server?.url) return enteredBase;
@@ -212,13 +317,27 @@ function clearChildren(element: Element): void {
   }
 }
 
-function showCatalog(cachedAt?: number): void {
+function categoriesForView(): Category[] {
+  if (catalogView === 'movies') return movieCategories;
+  if (catalogView === 'series') return seriesCategories;
+  return categories;
+}
+
+function updateCatalogHeading(): void {
+  catalogTitle.textContent = activeSeries
+    ? `${activeSeries.name ?? 'Series'} · Episodes`
+    : catalogView === 'movies' ? 'Movies' : catalogView === 'series' ? 'Series' : 'Live TV';
+  backToSeriesButton.classList.toggle('hidden', !activeSeries);
   clearChildren(categorySelect);
   categorySelect.appendChild(new Option('All categories', 'all'));
-  for (const category of categories) {
+  for (const category of categoriesForView()) {
     if (category.category_id === undefined || !category.category_name) continue;
-    categorySelect.add(new Option(category.category_name, String(category.category_id)));
+    categorySelect.appendChild(new Option(category.category_name, String(category.category_id)));
   }
+}
+
+function showCatalog(cachedAt?: number): void {
+  updateCatalogHeading();
   stateLabel.textContent = `${channels.length} channels`;
   setupSection.classList.add('hidden');
   librarySection.classList.remove('hidden');
@@ -233,18 +352,90 @@ function showCatalog(cachedAt?: number): void {
   }
 }
 
+async function saveCatalogSnapshot(key: string): Promise<void> {
+  try {
+    await writeCatalog({
+      key,
+      savedAt: Date.now(),
+      sourceType,
+      categories,
+      channels,
+      movieCategories,
+      movies,
+      seriesCategories,
+      series,
+      playbackBase: playbackBase ?? undefined,
+      allowedFormats: allowedLiveFormats,
+      liveFormat: activeLiveFormat ?? undefined
+    });
+  } catch {
+    // Catalog caching is best-effort on TVs with restricted storage.
+  }
+}
+
+async function loadMoviesAndSeries(key: string): Promise<void> {
+  const warnings: string[] = [];
+  if (!credentials) return;
+  libraryMessage.textContent = 'Loading movies in the background…';
+  libraryMessage.classList.remove('hidden', 'error');
+  libraryMessage.classList.add('loading');
+  try {
+    const categoryResponse = await api<Category[]>('get_vod_categories', {}, 120_000);
+    if (Array.isArray(categoryResponse)) movieCategories = categoryResponse;
+    if (catalogView === 'movies') updateCatalogHeading();
+  } catch {
+    warnings.push('movie categories unavailable');
+  }
+  try {
+    const movieResponse = await api<Movie[]>('get_vod_streams', {}, 180_000);
+    if (Array.isArray(movieResponse)) movies = movieResponse.filter((item) => item && item.stream_id !== undefined && item.name);
+  } catch {
+    warnings.push('movies unavailable');
+  }
+  if (!credentials) return;
+  await saveCatalogSnapshot(key);
+  if (!librarySection.classList.contains('hidden')) renderChannels();
+
+  libraryMessage.textContent = 'Loading series in the background…';
+  try {
+    const categoryResponse = await api<Category[]>('get_series_categories', {}, 120_000);
+    if (Array.isArray(categoryResponse)) seriesCategories = categoryResponse;
+    if (catalogView === 'series') updateCatalogHeading();
+  } catch {
+    warnings.push('series categories unavailable');
+  }
+  try {
+    const seriesResponse = await api<Series[]>('get_series', {}, 180_000);
+    if (Array.isArray(seriesResponse)) series = seriesResponse.filter((item) => item && item.series_id !== undefined && item.name);
+  } catch {
+    warnings.push('series unavailable');
+  }
+  if (!credentials) return;
+  await saveCatalogSnapshot(key);
+  if (!librarySection.classList.contains('hidden')) {
+    updateCatalogHeading();
+    renderChannels();
+  }
+  libraryMessage.textContent = warnings.length
+    ? `Live TV is ready. ${warnings.join('; ')}. Your provider may not support these catalogs.`
+    : `Ready · ${movies.length} movies · ${series.length} series`;
+  libraryMessage.classList.remove('hidden', 'error', 'loading');
+  stateLabel.textContent = `${channels.length} live channels · ${movies.length} movies · ${series.length} series`;
+}
+
 async function loadProvider(options: { startup?: boolean } = {}): Promise<void> {
   setBusy(true);
   setProgress('Checking provider URL…');
   let cache: CachedCatalog | null = null;
   let cacheKey = '';
   try {
+    sourceType = providerTypeSelect.value === 'm3u' ? 'm3u' : 'xtream';
     const base = normalizedBase(serverInput.value);
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
-    if (!username || !password) throw new Error('Enter both username and password.');
+    if (sourceType === 'xtream' && (!username || !password)) throw new Error('Enter both username and password.');
     credentials = { base, username, password };
-    cacheKey = catalogKey(base, username);
+    cacheKey = sourceType === 'm3u' ? m3uCatalogKey(base) : catalogKey(base, username);
 
     try {
       cache = await readCatalog(cacheKey);
@@ -254,12 +445,17 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     if (cache && Array.isArray(cache.channels) && cache.channels.length) {
       categories = Array.isArray(cache.categories) ? cache.categories : [];
       channels = cache.channels;
+      movieCategories = Array.isArray(cache.movieCategories) ? cache.movieCategories : [];
+      movies = Array.isArray(cache.movies) ? cache.movies : [];
+      seriesCategories = Array.isArray(cache.seriesCategories) ? cache.seriesCategories : [];
+      series = Array.isArray(cache.series) ? cache.series : [];
+      sourceType = cache.sourceType === 'm3u' ? 'm3u' : sourceType;
       playbackBase = cache.playbackBase ?? base;
       allowedLiveFormats = Array.isArray(cache.allowedFormats) ? cache.allowedFormats : [];
       activeLiveFormat = cache.liveFormat ?? null;
       showCatalog(cache.savedAt);
       const fresh = Date.now() - cache.savedAt < CATALOG_REFRESH_MS;
-      if (fresh && options.startup) {
+      if (fresh && options.startup && (sourceType === 'm3u' || (Array.isArray(cache.movies) && Array.isArray(cache.series)))) {
         stateLabel.textContent = `${channels.length} channels · saved`;
         libraryMessage.textContent = 'Using your saved channels. They refresh automatically after 24 hours.';
         setBusy(false);
@@ -274,11 +470,34 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     // Persist before network access so a failed/slow provider request cannot
     // discard what the user entered. The opt-out removes any older saved login.
     if (rememberProviderInput.checked) {
-      if (!saveProvider({ base, username, password, format: formatInput.value as LiveFormat })) {
+      if (!saveProvider({ base, username, password, format: formatInput.value as LiveFormat, kind: sourceType })) {
         throw new Error('TV storage could not save the login. Uncheck “Remember this login” to connect without saving.');
       }
     } else {
       forgetProvider();
+    }
+
+    if (sourceType === 'm3u') {
+      setProgress('Downloading your M3U playlist…');
+      const text = await fetchM3U(base);
+      const parsed = parseM3U(text);
+      if (!parsed.channels.length) throw new Error('The M3U file contains no valid channel entries.');
+      categories = parsed.categories;
+      channels = parsed.channels;
+      movieCategories = [];
+      movies = [];
+      seriesCategories = [];
+      series = [];
+      playbackBase = base;
+      activeLiveFormat = null;
+      await writeCatalog({ key: cacheKey, savedAt: Date.now(), sourceType: 'm3u', categories, channels });
+      catalogView = 'live';
+      catalogTypeSelect.value = 'live';
+      showCatalog();
+      libraryMessage.textContent = `${channels.length} channels loaded from M3U.`;
+      libraryMessage.classList.remove('hidden', 'loading', 'error');
+      channelList.querySelector<HTMLButtonElement>('button')?.focus();
+      return;
     }
 
     setProgress('Checking your provider login…');
@@ -300,20 +519,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     channels = channelResponse.filter((channel) => channel && channel.stream_id !== undefined && channel.name);
     if (!channels.length) throw new Error('The provider account has no live channels.');
 
-    const refreshedAt = Date.now();
-    try {
-      await writeCatalog({
-        key: cacheKey,
-        savedAt: refreshedAt,
-        categories,
-        channels,
-        playbackBase: playbackBase ?? base,
-        allowedFormats: allowedLiveFormats,
-        liveFormat: activeLiveFormat ?? 'ts'
-      });
-    } catch {
-      // Catalog caching is best-effort on TVs with restricted storage.
-    }
+    await saveCatalogSnapshot(cacheKey);
     showCatalog();
     passwordInput.value = '';
     if (categoryWarning) {
@@ -321,6 +527,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       libraryMessage.classList.remove('hidden', 'loading');
     }
     channelList.querySelector<HTMLButtonElement>('button')?.focus();
+    if (sourceType === 'xtream') window.setTimeout(() => { void loadMoviesAndSeries(cacheKey); }, 0);
   } catch (error) {
     const safeMessage = error instanceof Error ? error.message : 'Connection failed.';
     if (cache && channels.length) {
@@ -340,60 +547,160 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
 
 function renderChannels(append = false): void {
   const category = categorySelect.value;
-  visibleChannels = channels.filter((channel) => category === 'all' || String(channel.category_id ?? '') === category);
+  const query = searchInput.value.trim().toLowerCase();
+  visibleChannels = catalogView === 'live' && !activeSeries
+    ? channels.filter((channel) => (category === 'all' || String(channel.category_id ?? '') === category)
+      && (!query || String(channel.name ?? '').toLowerCase().includes(query)))
+    : [];
+  const items: Array<{ title: string; poster?: string; meta?: string; channel?: Channel; onSelect: () => void }> = [];
+  if (catalogView === 'live' && !activeSeries) {
+    for (const channel of visibleChannels) {
+      items.push({ title: channel.name ?? 'Unknown channel', meta: String(channel.num ?? 'Live TV'), channel, onSelect: () => playChannel(channel) });
+    }
+  } else if (activeSeries) {
+    for (const episode of seriesEpisodes) {
+      const title = episode.title ?? `Episode ${episode.episode_num ?? ''}`.trim();
+      if (query && !title.toLowerCase().includes(query)) continue;
+      items.push({
+        title,
+        poster: episode.info?.movie_image,
+        meta: `Season ${episode.season ?? '—'} · Episode ${episode.episode_num ?? '—'}`,
+        onSelect: () => playVod(title, episode.id, episode.container_extension, 'series')
+      });
+    }
+  } else if (catalogView === 'movies') {
+    for (const movie of movies) {
+      if (category !== 'all' && String(movie.category_id ?? '') !== category) continue;
+      const title = movie.name ?? 'Untitled movie';
+      if (query && !title.toLowerCase().includes(query)) continue;
+      const meta = [movie.year, movie.rating ? `★ ${movie.rating}` : ''].filter(Boolean).join(' · ');
+      items.push({ title, poster: movie.stream_icon, meta, onSelect: () => playVod(title, movie.stream_id, movie.container_extension, 'movie') });
+    }
+  } else {
+    for (const item of series) {
+      if (category !== 'all' && String(item.category_id ?? '') !== category) continue;
+      const title = item.name ?? 'Untitled series';
+      if (query && !title.toLowerCase().includes(query)) continue;
+      items.push({ title, poster: item.cover, meta: [item.releaseDate, item.genre].filter(Boolean).join(' · '), onSelect: () => { void openSeries(item); } });
+    }
+  }
   if (!append) {
     renderedCount = 0;
     clearChildren(channelList);
   }
-  const next = visibleChannels.slice(renderedCount, renderedCount + PAGE_SIZE);
+  const next = items.slice(renderedCount, renderedCount + PAGE_SIZE);
   const fragment = document.createDocumentFragment();
-  for (const channel of next) {
+  for (const item of next) {
     const button = document.createElement('button');
-    button.className = 'channel-card';
     button.type = 'button';
     button.setAttribute('role', 'listitem');
-    button.dataset.streamId = String(channel.stream_id);
-    button.setAttribute('aria-label', `Play ${channel.name}`);
-    const number = document.createElement('span');
-    number.className = 'channel-number';
-    number.textContent = String(channel.num ?? '•');
-    const name = document.createElement('span');
-    name.className = 'channel-name';
-    name.textContent = channel.name ?? 'Unknown channel';
-    button.appendChild(number);
-    button.appendChild(name);
-    button.addEventListener('click', () => playChannel(channel));
+    button.setAttribute('aria-label', item.title);
+    if (item.channel) {
+      button.className = 'channel-card';
+      button.dataset.streamId = String(item.channel.stream_id);
+      const number = document.createElement('span');
+      number.className = 'channel-number';
+      number.textContent = item.meta ?? '•';
+      const name = document.createElement('span');
+      name.className = 'channel-name';
+      name.textContent = item.title;
+      button.appendChild(number);
+      button.appendChild(name);
+    } else {
+      button.className = 'media-card';
+      if (item.poster) {
+        const poster = document.createElement('img');
+        poster.className = 'media-poster';
+        poster.alt = '';
+        poster.src = item.poster;
+        poster.setAttribute('loading', 'lazy');
+        poster.addEventListener('error', () => poster.classList.add('hidden'));
+        button.appendChild(poster);
+      }
+      const title = document.createElement('span');
+      title.className = 'media-card-title';
+      title.textContent = item.title;
+      button.appendChild(title);
+      if (item.meta) {
+        const meta = document.createElement('span');
+        meta.className = 'media-card-meta';
+        meta.textContent = item.meta;
+        button.appendChild(meta);
+      }
+    }
+    button.addEventListener('click', item.onSelect);
     fragment.appendChild(button);
   }
   channelList.appendChild(fragment);
   renderedCount += next.length;
-  moreButton.classList.toggle('hidden', renderedCount >= visibleChannels.length);
-  if (!visibleChannels.length) {
+  moreButton.classList.toggle('hidden', renderedCount >= items.length);
+  if (!items.length) {
     const empty = document.createElement('p');
     empty.className = 'muted';
-    empty.textContent = 'No channels in this category.';
+    empty.textContent = catalogView === 'live' ? 'No channels match this search or category.' : 'No titles match this search or category.';
     channelList.appendChild(empty);
   }
 }
 
-function streamUrl(channel: Channel): string {
-  if (!credentials) throw new Error('Provider is disconnected.');
-  const ext = activeLiveFormat ?? chooseLiveFormat({});
-  const path = ['live', credentials.username, credentials.password, `${channel.stream_id}.${ext}`]
-    .map((part) => encodeURIComponent(part)).join('/');
-  return `${playbackBase ?? credentials.base}/${path}`;
+async function openSeries(item: Series): Promise<void> {
+  if (!credentials) return;
+  activeSeries = item;
+  seriesEpisodes = [];
+  updateCatalogHeading();
+  categorySelect.value = 'all';
+  renderChannels();
+  libraryMessage.textContent = `Loading episodes for ${item.name ?? 'series'}…`;
+  libraryMessage.classList.remove('hidden', 'error');
+  libraryMessage.classList.add('loading');
+  try {
+    const response = await api<{ episodes?: Record<string, SeriesEpisode[]> }>('get_series_info', { series_id: String(item.series_id) }, 120_000);
+    const episodes = response.episodes ?? {};
+    for (const seasonKey of Object.keys(episodes)) {
+      for (const episode of episodes[seasonKey] ?? []) {
+        if (episode.season === undefined) episode.season = seasonKey;
+        seriesEpisodes.push(episode);
+      }
+    }
+    renderChannels();
+    libraryMessage.textContent = seriesEpisodes.length ? `${seriesEpisodes.length} episodes` : 'No episodes were returned for this series.';
+    libraryMessage.classList.remove('loading');
+  } catch (error) {
+    libraryMessage.textContent = error instanceof Error ? error.message : 'Could not load this series.';
+    libraryMessage.classList.remove('loading');
+    libraryMessage.classList.add('error');
+  }
 }
 
 async function playChannel(channel: Channel): Promise<void> {
+  if (!credentials) return;
+  if (channel.stream_url) {
+    await startPlayback(channel.name ?? 'Live TV', channel.stream_url, channel);
+    return;
+  }
+  const ext = activeLiveFormat ?? 'ts';
+  const path = ['live', credentials.username, credentials.password, `${channel.stream_id}.${ext}`]
+    .map((part) => encodeURIComponent(part)).join('/');
+  await startPlayback(channel.name ?? 'Live TV', `${playbackBase ?? credentials.base}/${path}`, channel);
+}
+
+async function playVod(title: string, id: number | string, extension: string | undefined, kind: 'movie' | 'series'): Promise<void> {
+  if (!credentials) return;
+  const safeExtension = extension && /^[a-z0-9]{1,8}$/i.test(extension) ? extension : 'mp4';
+  const path = [kind, credentials.username, credentials.password, `${id}.${safeExtension}`]
+    .map((part) => encodeURIComponent(part)).join('/');
+  await startPlayback(title, `${playbackBase ?? credentials.base}/${path}`, null);
+}
+
+async function startPlayback(title: string, url: string, channel: Channel | null): Promise<void> {
   selectedChannel = channel;
-  playingTitle.textContent = channel.name ?? 'Live TV';
+  playingTitle.textContent = title;
   playerMessage.textContent = 'Connecting to stream…';
   playerLayer.classList.remove('hidden');
   playPauseButton.textContent = 'Pause';
   video.pause();
   video.removeAttribute('src');
   video.load();
-  video.src = streamUrl(channel);
+  video.src = url;
   video.load();
   try {
     await video.play();
@@ -443,6 +750,15 @@ function disconnect(): void {
   activeLiveFormat = null;
   categories = [];
   channels = [];
+  movieCategories = [];
+  movies = [];
+  seriesCategories = [];
+  series = [];
+  seriesEpisodes = [];
+  activeSeries = null;
+  catalogView = 'live';
+  catalogTypeSelect.value = 'live';
+  searchInput.value = '';
   visibleChannels = [];
   renderedCount = 0;
   clearChildren(categorySelect);
@@ -455,7 +771,11 @@ function disconnect(): void {
   serverInput.value = saved?.base ?? '';
   usernameInput.value = saved?.username ?? '';
   passwordInput.value = saved?.password ?? '';
-  if (saved) formatInput.value = saved.format;
+  if (saved) {
+    formatInput.value = saved.format;
+    providerTypeSelect.value = saved.kind ?? 'xtream';
+  }
+  updateSourceTypeControls();
   setMessage(saved ? 'Disconnected. Your saved login remains on this TV.' : 'Disconnected. Session credentials were cleared.');
   serverInput.focus();
 }
@@ -465,7 +785,26 @@ form.addEventListener('submit', (event) => {
   void loadProvider();
 });
 saveProviderButton.addEventListener('click', saveCurrentProvider);
+providerTypeSelect.addEventListener('change', updateSourceTypeControls);
+catalogTypeSelect.addEventListener('change', () => {
+  catalogView = catalogTypeSelect.value as CatalogView;
+  activeSeries = null;
+  seriesEpisodes = [];
+  searchInput.value = '';
+  updateCatalogHeading();
+  renderChannels();
+});
+searchInput.addEventListener('input', () => {
+  window.clearTimeout(searchTimer);
+  searchTimer = window.setTimeout(() => renderChannels(), 180);
+});
 categorySelect.addEventListener('change', () => renderChannels());
+backToSeriesButton.addEventListener('click', () => {
+  activeSeries = null;
+  seriesEpisodes = [];
+  updateCatalogHeading();
+  renderChannels();
+});
 moreButton.addEventListener('click', () => renderChannels(true));
 $('disconnect-button').addEventListener('click', disconnect);
 $('close-player').addEventListener('click', closePlayer);
@@ -522,6 +861,8 @@ if (localProvider.base && localProvider.username && localProvider.password) {
   usernameInput.value = savedProvider.username;
   passwordInput.value = savedProvider.password;
   formatInput.value = savedProvider.format;
+  providerTypeSelect.value = savedProvider.kind ?? 'xtream';
+  updateSourceTypeControls();
   setMessage('Reconnecting with the login saved on this TV…');
   window.setTimeout(() => { void loadProvider({ startup: true }); }, 300);
 }

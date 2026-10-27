@@ -1,8 +1,8 @@
-# NextFlix — Phase 1
+# NextFlix — Phase 2 preview
 
 Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 
-## Phase 1 scope
+## Current scope
 
 - Enter an Xtream server URL, username, and password. The password is visible in this test build.
 - Run the browser version locally with `pnpm dev` to test provider login and channel loading before packaging.
@@ -19,6 +19,12 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 - Prefer the live format advertised by the Xtream account (MPEG-TS when allowed, otherwise HLS when available); allow a manual format override.
 - Use the provider's returned playback server when available, as well as its advertised output formats.
 - Report common network, decode, and unsupported-format playback failures separately.
+- Load Xtream VOD movies and series after Live TV becomes available.
+- Cache movie and series catalogues alongside live channels.
+- Search the selected catalogue and filter it by the provider's category names.
+- Display provider posters, movie year/rating, and series episode lists when returned by the provider.
+- Play movie and episode streams through the same HTML5 player.
+- Load a single M3U playlist URL, parse `group-title`, `tvg-id`, and `tvg-logo`, and play its channel URLs directly.
 
 When “Remember this login on this TV” is enabled, credentials are stored in the app's local storage without encryption so the app can reconnect on launch. They are not sent to NextFlix or logged; provider requests and stream URLs necessarily carry credentials to your IPTV provider. Uncheck the option to remove the saved login. Do not use a provider you are not authorized to access.
 
@@ -52,11 +58,11 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 ## Current limitations
 
 - Provider CORS rules can block `player_api.php` requests in the TV app.
-- Codec and stream compatibility vary by provider and TV. No stream has been tested on the target TV yet.
+- Codec and stream compatibility vary by provider and TV. The user has confirmed live channel loading and playback on the target TV; VOD and series still need TV testing.
 - The channel cache uses IndexedDB and stores rebuildable provider catalogue data, not IPTV credentials. If IndexedDB is unavailable, the app still connects but cannot show the catalogue offline.
 - Remembered credentials use unencrypted app local storage on the TV. The password is visible in this test build.
 - The player does not use the undocumented `com.webos.media` track API. Audio/subtitle enumeration is not implemented in Phase 1.
-- Catch-up, movies, series, profiles, EPG, and local pairing are outside Phase 1.
+- Multiple saved provider configurations merged into one library, profiles, EPG, catch-up, subtitles/audio-track selection, and local pairing are not implemented yet.
 
 ## Checklist
 
@@ -67,4 +73,5 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - [x] Temporary server and staged IPK cleaned up.
 - [x] Publish source and Homebrew catalog to the public GitHub repository.
 - [x] Publish the versioned IPK release asset.
-- [ ] Test provider connection, live playback, channel switching, and Back on the TV.
+- [x] User verified provider login, live-channel loading, and playback on the target TV.
+- [ ] Test VOD movies, series episode retrieval, and playback on the TV.

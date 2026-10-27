@@ -3,16 +3,54 @@ export type CatalogChannel = {
   num?: number | string;
   name?: string;
   stream_id: number | string;
+  stream_url?: string;
   stream_icon?: string;
   category_id?: string | number;
   epg_channel_id?: string;
 };
 
+export type CatalogMovie = {
+  stream_id: number | string;
+  name?: string;
+  stream_icon?: string;
+  category_id?: string | number;
+  container_extension?: string;
+  added?: string | number;
+  rating?: string | number;
+  plot?: string;
+  year?: string | number;
+};
+
+export type CatalogSeries = {
+  series_id: number | string;
+  name?: string;
+  cover?: string;
+  category_id?: string | number;
+  plot?: string;
+  releaseDate?: string;
+  rating?: string | number;
+  genre?: string;
+};
+
+export type SeriesEpisode = {
+  id: number | string;
+  title?: string;
+  episode_num?: number | string;
+  season?: number | string;
+  container_extension?: string;
+  info?: { movie_image?: string; plot?: string; duration?: string; releasedate?: string };
+};
+
 export type CachedCatalog = {
   key: string;
   savedAt: number;
+  sourceType?: 'xtream' | 'm3u';
   categories: CatalogCategory[];
   channels: CatalogChannel[];
+  movieCategories?: CatalogCategory[];
+  movies?: CatalogMovie[];
+  seriesCategories?: CatalogCategory[];
+  series?: CatalogSeries[];
   playbackBase?: string;
   allowedFormats?: string[];
   liveFormat?: string;
