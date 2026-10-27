@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#101116" />
+    <title>NextFlix</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand" aria-label="NextFlix"><span>Next</span>Flix</div>
+        <div id="connection-state" class="connection-state">Not connected</div>
+      </header>
+
+      <main>
+        <section id="setup" class="setup panel">
+          <div class="eyebrow">PHASE 1 · LIVE TV</div>
+          <h1>Watch your channels</h1>
+          <p class="muted">Connect to an IPTV provider you are authorized to use.</p>
+          <form id="connect-form" autocomplete="off">
+            <label>Server URL<input id="server" type="url" inputmode="url" placeholder="https://provider.example:8080" required /></label>
+            <div class="credentials">
+              <label>Username<input id="username" type="text" autocomplete="off" required /></label>
+              <label>Password<input id="password" type="password" autocomplete="new-password" required /></label>
+            </div>
+            <div class="actions">
+              <button id="connect-button" class="primary" type="submit">Connect and load channels</button>
+              <label class="format-label">Live format
+                <select id="format"><option value="ts">MPEG-TS (.ts)</option><option value="m3u8">HLS (.m3u8)</option></select>
+              </label>
+            </div>
+          </form>
+          <div id="message" class="message" role="status" aria-live="polite"></div>
+          <p class="privacy-note">Credentials stay in app memory for this session and are not saved or logged.</p>
+        </section>
+
+        <section id="library" class="library hidden" aria-label="Live channels">
+          <div class="library-heading">
+            <div>
+              <div class="eyebrow">LIVE TV</div>
+              <h1>Channels</h1>
+            </div>
+            <div class="library-actions">
+              <label class="filter-label">Category<select id="category"><option value="all">All categories</option></select></label>
+              <button id="disconnect-button" class="quiet">Disconnect</button>
+            </div>
+          </div>
+          <div id="channel-list" class="channel-list" role="list"></div>
+          <button id="more-button" class="more-button hidden">Load more channels</button>
+        </section>
+      </main>
+
+      <section id="player" class="player hidden" aria-label="Video player">
+        <video id="video" playsinline></video>
+        <div class="player-top"><div id="playing-title"></div><button id="close-player" class="player-button" aria-label="Close player">Back</button></div>
+        <div class="player-bottom">
+          <div id="player-message" role="status" aria-live="polite"></div>
+          <div class="player-controls"><button id="play-pause" class="player-button">Pause</button><button id="previous-channel" class="player-button">Previous channel</button><button id="next-channel" class="player-button">Next channel</button></div>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
