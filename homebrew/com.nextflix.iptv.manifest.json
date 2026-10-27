@@ -1,16 +1,16 @@
 {
   "id": "com.nextflix.iptv",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "web",
   "title": "NextFlix",
   "appDescription": "A lightweight IPTV live channel player for LG webOS.",
   "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/largeIcon.png",
   "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
   "rootRequired": false,
-  "ipkUrl": "https://github.com/marcpnut/nextflix-webos/releases/download/v0.3.0/com.nextflix.iptv_0.3.0_all.ipk",
+  "ipkUrl": "https://github.com/marcpnut/nextflix-webos/releases/download/v0.3.1/com.nextflix.iptv_0.3.1_all.ipk",
   "ipkHash": {
-    "sha256": "9822fd2ad62d00a7521ce1e733bfe157bf284eca9fe01f858cbade070e7ed4a9"
+    "sha256": "f478314f0b3bac434aec4b188b9aa3902c1ac9ef3eb83417725e7463a569972f"
   },
-  "ipkSize": 18284,
-  "installedSize": 51044.0
+  "ipkSize": 19708,
+  "installedSize": 55054.0
 }

@@ -54,6 +54,8 @@ const heroPlayButton = $('hero-play') as HTMLButtonElement;
 const heroBrowseButton = $('hero-browse') as HTMLButtonElement;
 const homeMovies = $('home-movies');
 const homeSeries = $('home-series');
+const mainLanguageFilter = $('main-language-filter');
+const settingsLanguageFilter = $('settings-language-filter');
 const detailPoster = $('detail-poster') as HTMLImageElement;
 const detailKind = $('detail-kind');
 const detailTitle = $('detail-title');
@@ -82,7 +84,7 @@ const playPauseButton = $('play-pause') as HTMLButtonElement;
 const PAGE_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.3.0';
+const APP_VERSION = '0.3.1';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -106,6 +108,8 @@ let detailItem: { kind: 'movie'; item: Movie } | { kind: 'series'; item: Series 
 let featuredItem: { kind: 'movie'; item: Movie } | { kind: 'series'; item: Series } | null = null;
 let hiddenCategoryIds: Record<CatalogView, Set<string>> = { live: new Set(), movies: new Set(), series: new Set() };
 let hiddenCategoriesKey = 'nextflix.hidden-categories.v1';
+let languageFilterKey = 'nextflix.language-filter.v1';
+let activeLanguageFilter = 'all';
 let favorites = new Set<string>();
 const FAVORITES_KEY = 'nextflix.my-list.v1';
 let searchTimer = 0;
@@ -361,8 +365,101 @@ function categoriesForView(): Category[] {
   return categories;
 }
 
+const LANGUAGE_NAMES: Record<string, string> = {
+  AL: 'Albanian', AR: 'Arabic', BG: 'Bulgarian', BR: 'Brazilian Portuguese', BA: 'Bosnian',
+  CN: 'Chinese', HR: 'Croatian', CZ: 'Czech', DK: 'Danish', NL: 'Dutch', EN: 'English',
+  UK: 'UK English', EE: 'Estonian', FA: 'Persian', FI: 'Finnish', FR: 'French', DE: 'German',
+  GR: 'Greek', EL: 'Greek', HE: 'Hebrew', HI: 'Hindi', HU: 'Hungarian', ID: 'Indonesian',
+  IT: 'Italian', JP: 'Japanese', JA: 'Japanese', KR: 'Korean', KO: 'Korean', LV: 'Latvian',
+  LT: 'Lithuanian', MK: 'Macedonian', MS: 'Malay', NO: 'Norwegian', PL: 'Polish', PT: 'Portuguese',
+  RO: 'Romanian', RU: 'Russian', RS: 'Serbian', SK: 'Slovak', SI: 'Slovenian', ES: 'Spanish',
+  SE: 'Swedish', TH: 'Thai', TR: 'Turkish', UA: 'Ukrainian', VI: 'Vietnamese', MULTI: 'Multi-language'
+};
+
+function allProviderCategories(): Category[] {
+  return categories.concat(movieCategories, seriesCategories);
+}
+
+function languagesInCategory(name: string | undefined): string[] {
+  if (!name || name.indexOf('|') < 0) return [];
+  const ignored = new Set(['TV', 'HD', 'SD', 'IP', 'VOD', '4K']);
+  const tokens = name.toUpperCase().split('|').join('/').split(/[^A-Z]+/);
+  return Array.from(new Set(tokens.filter((token) => token === 'MULTI' || (/^[A-Z]{2}$/.test(token) && !ignored.has(token)))));
+}
+
+function availableLanguages(): string[] {
+  const result = new Set<string>();
+  for (const category of allProviderCategories()) {
+    for (const language of languagesInCategory(category.category_name)) result.add(language);
+  }
+  return Array.from(result).sort((left, right) => left === 'MULTI' ? 1 : right === 'MULTI' ? -1 : left.localeCompare(right));
+}
+
+function languageFlag(code: string): string {
+  if (code === 'MULTI') return '🌐';
+  const country = code === 'UK' ? 'GB' : code === 'EN' ? 'GB' : code === 'EL' ? 'GR' : code === 'JA' ? 'JP' : code === 'KO' ? 'KR' : code === 'RS' ? 'RS' : code;
+  if (!/^[A-Z]{2}$/.test(country)) return '🏳';
+  return String.fromCodePoint(0x1f1e6 + country.charCodeAt(0) - 65, 0x1f1e6 + country.charCodeAt(1) - 65);
+}
+
+function renderLanguageFilter(container: HTMLElement): void {
+  clearChildren(container);
+  const languages = availableLanguages();
+  container.classList.toggle('hidden', languages.length === 0);
+  if (!languages.length) return;
+  const label = document.createElement('span');
+  label.className = 'language-filter-label';
+  label.textContent = 'Language';
+  container.appendChild(label);
+  const compact = languages.length < 10;
+  const options = [{ code: 'all', name: 'All' }, ...languages.map((code) => ({ code, name: LANGUAGE_NAMES[code] ?? code }))];
+  for (const option of options) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `language-choice${compact ? '' : ' text-choice'}${activeLanguageFilter === option.code ? ' selected' : ''}`;
+    button.setAttribute('aria-pressed', String(activeLanguageFilter === option.code));
+    button.setAttribute('aria-label', option.code === 'all' ? 'All languages' : option.name);
+    button.title = option.code === 'all' ? 'All languages' : option.name;
+    if (compact && option.code !== 'all') {
+      const flag = document.createElement('span');
+      flag.className = 'language-flag';
+      flag.textContent = languageFlag(option.code);
+      button.appendChild(flag);
+      const code = document.createElement('span');
+      code.className = 'language-code';
+      code.textContent = option.code;
+      button.appendChild(code);
+    } else {
+      button.textContent = option.name;
+    }
+    button.addEventListener('click', () => {
+      activeLanguageFilter = option.code;
+      try { localStorage.setItem(languageFilterKey, activeLanguageFilter); } catch { /* Session-only selection. */ }
+      updateLanguageFilters();
+      updateCatalogHeading();
+      renderChannels();
+      renderHome();
+      renderCategorySettings();
+    });
+    container.appendChild(button);
+  }
+}
+
+function updateLanguageFilters(): void {
+  const languages = availableLanguages();
+  if (activeLanguageFilter !== 'all' && languages.indexOf(activeLanguageFilter) < 0) activeLanguageFilter = 'all';
+  renderLanguageFilter(mainLanguageFilter);
+  renderLanguageFilter(settingsLanguageFilter);
+  const mainPages: AppPage[] = ['home', 'search', 'movies', 'series', 'live', 'my-list'];
+  mainLanguageFilter.classList.toggle('hidden', languages.length === 0 || mainPages.indexOf(currentPage) < 0);
+}
+
 function isCategoryVisible(view: CatalogView, categoryId: string | number | undefined): boolean {
-  return categoryId === undefined || !hiddenCategoryIds[view].has(String(categoryId));
+  if (categoryId !== undefined && hiddenCategoryIds[view].has(String(categoryId))) return false;
+  if (activeLanguageFilter === 'all') return true;
+  const sourceCategories = view === 'live' ? categories : view === 'movies' ? movieCategories : seriesCategories;
+  const category = sourceCategories.find((item) => String(item.category_id ?? '') === String(categoryId ?? ''));
+  return !!category && languagesInCategory(category.category_name).indexOf(activeLanguageFilter) >= 0;
 }
 
 function saveHiddenCategories(): void {
@@ -377,13 +474,16 @@ function saveHiddenCategories(): void {
 
 function loadHiddenCategories(key: string): void {
   hiddenCategoriesKey = `nextflix.hidden-categories.${m3uCatalogKey(key)}`;
+  languageFilterKey = `${hiddenCategoriesKey}.language`;
   try {
     const saved = JSON.parse(localStorage.getItem(hiddenCategoriesKey) ?? '{}') as Partial<Record<CatalogView, unknown>>;
     for (const view of ['live', 'movies', 'series'] as CatalogView[]) {
       hiddenCategoryIds[view] = Array.isArray(saved[view]) ? new Set((saved[view] as unknown[]).map(String)) : new Set();
     }
+    activeLanguageFilter = localStorage.getItem(languageFilterKey) ?? 'all';
   } catch {
     hiddenCategoryIds = { live: new Set(), movies: new Set(), series: new Set() };
+    activeLanguageFilter = 'all';
   }
 }
 
@@ -418,6 +518,7 @@ function showMovieDetails(item: Movie): void {
   detailPlayButton.textContent = 'Play movie';
   detailListButton.textContent = favorites.has(favoriteKey('movie', item.stream_id)) ? 'Remove from My List' : 'Add to My List';
   showPage('detail');
+  detailPlayButton.focus();
 }
 
 function showSeriesDetails(item: Series): void {
@@ -435,6 +536,7 @@ function showSeriesDetails(item: Series): void {
   detailPlayButton.textContent = 'View episodes';
   detailListButton.textContent = favorites.has(favoriteKey('series', item.series_id)) ? 'Remove from My List' : 'Add to My List';
   showPage('detail');
+  detailPlayButton.focus();
 }
 
 function renderPosterRow(container: HTMLElement, kind: 'movie' | 'series', items: Array<Movie | Series>): void {
@@ -557,6 +659,7 @@ function renderCategorySettings(): void {
 function showPage(page: AppPage): void {
   const leavingDetail = currentPage === 'detail' && page !== 'detail';
   currentPage = page;
+  updateLanguageFilters();
   homeView.classList.toggle('hidden', page !== 'home');
   detailView.classList.toggle('hidden', page !== 'detail');
   settingsView.classList.toggle('hidden', page !== 'settings');
@@ -605,6 +708,7 @@ function updateCatalogHeading(): void {
 
 function showCatalog(cachedAt?: number): void {
   updateCatalogHeading();
+  updateLanguageFilters();
   stateLabel.textContent = `${channels.length} channels`;
   setupSection.classList.add('hidden');
   appLayout.classList.remove('hidden');
@@ -662,6 +766,7 @@ async function loadMoviesAndSeries(key: string): Promise<void> {
   }
   if (!credentials) return;
   await saveCatalogSnapshot(key);
+  updateLanguageFilters();
   if (currentPage === 'movies') renderChannels();
   if (currentPage === 'home') renderHome();
 
@@ -683,6 +788,7 @@ async function loadMoviesAndSeries(key: string): Promise<void> {
   if (!credentials) return;
   await saveCatalogSnapshot(key);
   if (!librarySection.classList.contains('hidden')) {
+    updateLanguageFilters();
     updateCatalogHeading();
     renderChannels();
   }
