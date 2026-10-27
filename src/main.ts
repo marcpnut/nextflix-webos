@@ -39,7 +39,7 @@ const playPauseButton = $('play-pause') as HTMLButtonElement;
 const PAGE_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.1.7';
+const APP_VERSION = '0.1.8';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat };
@@ -205,8 +205,17 @@ function chooseLiveFormat(auth: XtreamAuth): string {
   return allowedLiveFormats[0] ?? 'ts';
 }
 
+// Element.replaceChildren is missing in some webOS browser runtimes. Keep
+// playlist rendering compatible with the older DOM APIs available there.
+function clearChildren(element: Element): void {
+  while (element.firstChild) {
+    element.removeChild(element.firstChild);
+  }
+}
+
 function showCatalog(cachedAt?: number): void {
-  categorySelect.replaceChildren(new Option('All categories', 'all'));
+  clearChildren(categorySelect);
+  categorySelect.appendChild(new Option('All categories', 'all'));
   for (const category of categories) {
     if (category.category_id === undefined || !category.category_name) continue;
     categorySelect.add(new Option(category.category_name, String(category.category_id)));
@@ -335,7 +344,7 @@ function renderChannels(append = false): void {
   visibleChannels = channels.filter((channel) => category === 'all' || String(channel.category_id ?? '') === category);
   if (!append) {
     renderedCount = 0;
-    channelList.replaceChildren();
+    clearChildren(channelList);
   }
   const next = visibleChannels.slice(renderedCount, renderedCount + PAGE_SIZE);
   const fragment = document.createDocumentFragment();
@@ -436,8 +445,9 @@ function disconnect(): void {
   channels = [];
   visibleChannels = [];
   renderedCount = 0;
-  categorySelect.replaceChildren(new Option('All categories', 'all'));
-  channelList.replaceChildren();
+  clearChildren(categorySelect);
+  categorySelect.appendChild(new Option('All categories', 'all'));
+  clearChildren(channelList);
   librarySection.classList.add('hidden');
   setupSection.classList.remove('hidden');
   stateLabel.textContent = 'Not connected';
