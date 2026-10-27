@@ -68,8 +68,8 @@ input, select { width: 100%; padding: 0 16px; border: 1px solid #474a56; backgro
 .quiet { background: transparent; }
 .channel-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 26px; }
 .channel-card { display: flex; align-items: center; gap: 15px; min-height: 86px; text-align: left; padding: 12px 18px; overflow: hidden; }
-.media-card { display: flex; flex-direction: column; align-items: stretch; gap: 9px; min-width: 0; min-height: 300px; height: auto; padding: 10px; overflow: hidden; text-align: left; }
-.media-poster { display: block; width: 100%; max-width: 100%; min-width: 0; height: 205px; max-height: 205px; object-fit: contain; background: #1c1e27; }
+.media-card { display: flex; flex-direction: column; align-items: stretch; gap: 9px; min-width: 0; min-height: 480px; height: auto; padding: 10px; overflow: hidden; text-align: left; }
+.media-poster { display: block; width: 100%; max-width: 100%; min-width: 0; height: 380px; max-height: 380px; object-fit: cover; background: #1c1e27; }
 .media-card-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; font-weight: 700; }
 .media-card-meta { color: #a4a5b2; font-size: 14px; }
 .channel-number { min-width: 38px; color: #f04455; font-weight: 700; }
@@ -88,7 +88,7 @@ input, select { width: 100%; padding: 0 16px; border: 1px solid #474a56; backgro
 .home-row h2 { margin: 0 0 16px; font-size: 25px; }
 .poster-row { display: flex; overflow-x: auto; padding: 8px 10px 18px; scroll-behavior: smooth; }
 .poster-tile { flex: 0 0 190px; width: 190px; min-width: 190px; max-width: 190px; min-height: 285px; height: auto; display: flex; flex-direction: column; gap: 8px; margin: 0 24px 0 0; padding: 8px; overflow: hidden; text-align: left; }
-.poster-tile img { display: block; width: 100%; max-width: 100%; min-width: 0; height: 220px; object-fit: cover; background: #323541; }
+.poster-tile img { display: block; width: 94%; max-width: 100%; min-width: 0; height: 210px; margin: 0 auto; object-fit: cover; background: #323541; }
 .poster-tile span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail-back { margin-bottom: 28px; }
 .detail-layout { display: grid; grid-template-columns: minmax(240px, 360px) 1fr; gap: 42px; align-items: start; }
@@ -98,13 +98,6 @@ input, select { width: 100%; padding: 0 16px; border: 1px solid #474a56; backgro
 .detail-description { max-width: 760px; color: #d5d5dc; font-size: 19px; line-height: 1.55; }
 .settings-type-label { max-width: 520px; margin: 24px 0; }
 .settings-actions { display: flex; gap: 12px; margin-bottom: 18px; }
-.language-filter { display: flex; flex-wrap: wrap; align-items: center; margin: 0 0 22px; }
-.language-filter.hidden { display: none; }
-.language-filter-label { margin: 0 16px 8px 0; color: #a4a5b2; font-size: 16px; }
-.language-choice { min-width: 58px; min-height: 50px; margin: 0 12px 8px 0; padding: 0 14px; border-color: #4a4c58; background: #292c36; font-size: 22px; }
-.language-choice.selected { border-color: #f04455; background: #3a2a32; }
-.language-choice.text-choice { font-size: 16px; }
-.settings-language-filter { max-width: 1100px; padding: 16px; border-radius: 12px; background: #1c1e27; }
 .category-visibility-list { max-width: 900px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; }
 .category-visibility-item { display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 8px 14px; border-radius: 8px; background: #1c1e27; }
 .category-visibility-item input { width: 26px; height: 26px; accent-color: #f04455; }
