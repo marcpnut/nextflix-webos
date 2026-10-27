@@ -35,7 +35,7 @@
             </div>
           </form>
           <div id="message" class="message" role="status" aria-live="polite"></div>
-          <p id="app-version" class="privacy-note">NextFlix 0.3.7 · waiting for app script</p>
+          <p id="app-version" class="privacy-note">NextFlix 0.3.8 · waiting for app script</p>
           <p class="privacy-note">When enabled, login details are saved in this app’s local storage on the TV. They are not encrypted or sent to NextFlix. They are sent to your IPTV provider when connecting and streaming.</p>
         </section>
 
@@ -72,6 +72,12 @@
             <section id="settings-view" class="settings-view hidden">
               <div class="eyebrow">PREFERENCES</div><h1>Settings</h1><p class="muted">Choose which provider categories appear while browsing.</p>
               <label class="settings-type-label">Category group<select id="settings-category-type"><option value="live">Live TV</option><option value="movies">Movies</option><option value="series">Series</option></select></label>
+              <section class="track-preferences" aria-labelledby="track-preferences-title">
+                <h2 id="track-preferences-title">Playback languages</h2>
+                <p class="muted">Enter language codes in preference order, separated by commas (for example: en,nl). Subtitles stay off if none match.</p>
+                <label>Preferred audio languages<input id="audio-language-preferences" type="text" placeholder="en,nl" autocomplete="off" /></label>
+                <label>Preferred subtitle languages<input id="subtitle-language-preferences" type="text" placeholder="nl,en" autocomplete="off" /></label>
+              </section>
               <div class="settings-actions"><button id="show-all-categories">Show all</button><button id="hide-all-categories">Hide all</button></div>
               <div id="category-visibility-list" class="category-visibility-list"></div>
             </section>
@@ -125,7 +131,18 @@
             <button id="play-pause" class="player-icon-button play-toggle" aria-label="Pause" title="Pause"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg></button>
             <button id="next-channel" class="player-icon-button" aria-label="Next channel" title="Next channel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M5 6l9 6-9 6z" /></svg></button>
             <button id="seek-forward" class="player-icon-button hidden" aria-label="Forward 10 seconds" title="Forward 10 seconds"><svg class="skip-icon" viewBox="0 0 40 40" aria-hidden="true"><path d="M29 11V4m0 7h-7m6.5-.5A13 13 0 1 0 31 20" /><text x="13" y="23">10</text></svg></button>
+            <button id="audio-tracks" class="player-icon-button hidden" aria-label="Audio tracks" title="Audio tracks"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4m4-7v10m4-13v16m4-13v10m4-7v4" /></svg></button>
+            <button id="subtitle-tracks" class="player-icon-button hidden" aria-label="Subtitles" title="Subtitles"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5l-3 3-3-3H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" /><path d="M6 11h5m2 0h5M6 15h3m3 0h6" /></svg></button>
           </div>
+        </div>
+        <div id="track-menu" class="track-menu hidden" role="dialog" aria-modal="true" aria-labelledby="track-menu-title">
+          <h2 id="track-menu-title">Tracks</h2>
+          <div id="track-options" class="track-options"></div>
+        </div>
+        <div id="next-episode-prompt" class="next-episode-prompt hidden" role="status" aria-live="polite">
+          <span id="next-episode-countdown"></span>
+          <button id="next-episode-play" class="primary">Play now</button>
+          <button id="next-episode-cancel" class="quiet">Cancel</button>
         </div>
       </section>
     </div>

@@ -90,11 +90,22 @@ const seekRow = $('seek-row');
 const seekBar = $('seek-bar') as HTMLInputElement;
 const seekCurrent = $('seek-current');
 const seekDuration = $('seek-duration');
+const audioLanguagePreferencesInput = $('audio-language-preferences') as HTMLInputElement;
+const subtitleLanguagePreferencesInput = $('subtitle-language-preferences') as HTMLInputElement;
+const audioTracksButton = $('audio-tracks') as HTMLButtonElement;
+const subtitleTracksButton = $('subtitle-tracks') as HTMLButtonElement;
+const trackMenu = $('track-menu');
+const trackMenuTitle = $('track-menu-title');
+const trackOptions = $('track-options');
+const nextEpisodePrompt = $('next-episode-prompt');
+const nextEpisodeCountdown = $('next-episode-countdown');
+const nextEpisodePlayButton = $('next-episode-play') as HTMLButtonElement;
+const nextEpisodeCancelButton = $('next-episode-cancel') as HTMLButtonElement;
 
 const PAGE_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.3.7';
+const APP_VERSION = '0.3.8';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -124,6 +135,9 @@ let activeLanguageFilters: Record<CatalogView, string> = { live: 'all', movies: 
 let favorites = new Set<string>();
 const FAVORITES_KEY = 'nextflix.my-list.v1';
 const WATCH_HISTORY_KEY = 'nextflix.watch-history.v1';
+const TRACK_PREFERENCES_KEY = 'nextflix.track-preferences.v1';
+type MediaTrack = { language?: string; label?: string; kind?: string; enabled?: boolean; mode?: string };
+type TrackList = { length: number; [index: number]: MediaTrack; addEventListener?: (type: string, listener: EventListener) => void };
 type WatchProgress = {
   key: string;
   scope: string;
@@ -158,6 +172,14 @@ let seekHoldDirection: -1 | 1 | 0 = 0;
 let seekHoldStartedAt = 0;
 let seekHoldLastSignal = 0;
 let openDropdown: HTMLSelectElement | null = null;
+let preferredAudioLanguages = ['en', 'nl'];
+let preferredSubtitleLanguages = ['nl', 'en'];
+let manualAudioTrackIndex: number | null = null;
+let manualSubtitleTrackIndex: number | null = null;
+let openTrackMenu: 'audio' | 'subtitles' | null = null;
+let episodeCountdownTimer = 0;
+let nextEpisode: SeriesEpisode | null = null;
+const observedTrackLists = new WeakSet<object>();
 
 function setMessage(text: string, isError = false): void {
   message.textContent = text;
@@ -456,7 +478,10 @@ function renderLanguageFilter(): void {
         updateCatalogHeading();
         renderChannels();
       }
+      Array.from(languageFilter.querySelectorAll<HTMLButtonElement>('.language-choice'))
+        .find((candidate) => candidate.dataset.language === option.value)?.focus();
     });
+    button.dataset.language = option.value;
     languageFilter.appendChild(button);
   }
 }
@@ -547,6 +572,183 @@ function updatePlaybackControls(): void {
   nextChannelButton.classList.toggle('hidden', !live);
   seekBackButton.classList.toggle('hidden', live);
   seekForwardButton.classList.toggle('hidden', live);
+  updateTrackButtonVisibility();
+}
+
+function audioTrackList(): TrackList | null {
+  try { return (video as HTMLVideoElement & { audioTracks?: TrackList }).audioTracks ?? null; }
+  catch { return null; }
+}
+
+function subtitleTrackList(): TrackList | null {
+  return video.textTracks as unknown as TrackList;
+}
+
+function tracksOf(list: TrackList | null): MediaTrack[] {
+  if (!list) return [];
+  const tracks: MediaTrack[] = [];
+  for (let index = 0; index < list.length; index += 1) tracks.push(list[index]);
+  return tracks;
+}
+
+function subtitleTracks(): MediaTrack[] {
+  return tracksOf(subtitleTrackList()).filter((track) => !track.kind || ['subtitles', 'captions', 'forced'].includes(track.kind));
+}
+
+function normalizeTrackLanguage(value: string): string {
+  return value.trim().toLowerCase().replace(/_/g, '-').split('-')[0];
+}
+
+function trackMatchesPreferences(track: MediaTrack, preferences: string[]): boolean {
+  const language = normalizeTrackLanguage(track.language ?? '');
+  const label = (track.label ?? '').toLowerCase();
+  return preferences.some((preference) => {
+    const normalized = normalizeTrackLanguage(preference);
+    return normalized && (normalized === language || label.includes(normalized));
+  });
+}
+
+function updateTrackButtonVisibility(): void {
+  audioTracksButton.classList.toggle('hidden', tracksOf(audioTrackList()).length === 0);
+  subtitleTracksButton.classList.toggle('hidden', subtitleTracks().length === 0);
+}
+
+function applyPreferredTracks(): void {
+  const audioTracks = tracksOf(audioTrackList());
+  if (manualAudioTrackIndex === null && audioTracks.length) {
+    let preferredIndex = audioTracks.findIndex((track) => trackMatchesPreferences(track, preferredAudioLanguages));
+    if (preferredIndex < 0) preferredIndex = Math.max(0, audioTracks.findIndex((track) => track.enabled));
+    audioTracks.forEach((track, index) => { try { track.enabled = index === preferredIndex; } catch { /* Ignore read-only track implementations. */ } });
+  }
+
+  const subtitles = subtitleTracks();
+  if (manualSubtitleTrackIndex === null) {
+    const preferredIndex = subtitles.findIndex((track) => trackMatchesPreferences(track, preferredSubtitleLanguages));
+    subtitles.forEach((track, index) => { try { track.mode = index === preferredIndex ? 'showing' : 'disabled'; } catch { /* Ignore unsupported subtitle controls. */ } });
+  }
+  updateTrackButtonVisibility();
+  if (openTrackMenu) renderTrackMenu(openTrackMenu);
+}
+
+function observeAvailableTracks(): void {
+  const lists = [audioTrackList(), video.textTracks as unknown as TrackList].filter((list): list is TrackList => !!list);
+  for (const list of lists) {
+    if (observedTrackLists.has(list)) continue;
+    observedTrackLists.add(list);
+    list.addEventListener?.('addtrack', applyPreferredTracks);
+  }
+}
+
+function closeTrackMenu(restoreFocus = true): void {
+  const previousMenu = openTrackMenu;
+  openTrackMenu = null;
+  trackMenu.classList.add('hidden');
+  if (restoreFocus) (previousMenu === 'audio' ? audioTracksButton : subtitleTracksButton).focus();
+}
+
+function renderTrackMenu(type: 'audio' | 'subtitles'): void {
+  const tracks = type === 'audio' ? tracksOf(audioTrackList()) : subtitleTracks();
+  clearChildren(trackOptions);
+  trackMenuTitle.textContent = type === 'audio' ? 'Audio' : 'Subtitles';
+  const addOption = (label: string, selected: boolean, onSelect: () => void): void => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = `track-option${selected ? ' selected' : ''}`;
+    option.textContent = label;
+    option.setAttribute('aria-pressed', String(selected));
+    option.addEventListener('click', () => { onSelect(); closeTrackMenu(); });
+    trackOptions.appendChild(option);
+  };
+  if (type === 'audio') {
+    addOption('Auto · preferred language', manualAudioTrackIndex === null, () => {
+      manualAudioTrackIndex = null;
+      applyPreferredTracks();
+    });
+    tracks.forEach((track, index) => {
+      addOption(track.label || track.language || `Audio ${index + 1}`, manualAudioTrackIndex === index || (manualAudioTrackIndex === null && track.enabled === true), () => {
+        manualAudioTrackIndex = index;
+        tracks.forEach((entry, trackIndex) => { try { entry.enabled = trackIndex === index; } catch { /* Ignore read-only track implementations. */ } });
+      });
+    });
+  } else {
+    addOption('Auto · preferred language', manualSubtitleTrackIndex === null, () => {
+      manualSubtitleTrackIndex = null;
+      applyPreferredTracks();
+    });
+    addOption('Off', manualSubtitleTrackIndex === -1 || (manualSubtitleTrackIndex === null && !tracks.some((track) => track.mode === 'showing')), () => {
+      manualSubtitleTrackIndex = -1;
+      tracks.forEach((track) => { try { track.mode = 'disabled'; } catch { /* Ignore unsupported subtitle controls. */ } });
+    });
+    tracks.forEach((track, index) => {
+      addOption(track.label || track.language || `Subtitle ${index + 1}`, manualSubtitleTrackIndex === index || (manualSubtitleTrackIndex === null && track.mode === 'showing'), () => {
+        manualSubtitleTrackIndex = index;
+        tracks.forEach((entry, trackIndex) => { try { entry.mode = trackIndex === index ? 'showing' : 'disabled'; } catch { /* Ignore unsupported subtitle controls. */ } });
+      });
+    });
+  }
+}
+
+function showTrackMenu(type: 'audio' | 'subtitles'): void {
+  const tracks = type === 'audio' ? tracksOf(audioTrackList()) : subtitleTracks();
+  if (!tracks.length) {
+    playerMessage.textContent = `No ${type === 'audio' ? 'audio' : 'subtitle'} tracks are exposed by this stream.`;
+    return;
+  }
+  openTrackMenu = type;
+  renderTrackMenu(type);
+  trackMenu.classList.remove('hidden');
+  trackOptions.querySelector<HTMLButtonElement>('.selected')?.focus();
+}
+
+function stopEpisodeCountdown(): void {
+  if (episodeCountdownTimer) window.clearInterval(episodeCountdownTimer);
+  episodeCountdownTimer = 0;
+  nextEpisode = null;
+  nextEpisodePrompt.classList.add('hidden');
+}
+
+function startEpisodeCountdown(): void {
+  stopEpisodeCountdown();
+  if (!currentVodEntry || currentVodEntry.kind !== 'series' || !activeSeries || String(activeSeries.series_id) !== currentVodEntry.seriesId) {
+    playerMessage.textContent = 'Playback finished.';
+    return;
+  }
+  const ordered = [...seriesEpisodes].sort((left, right) => {
+    const seasonDifference = Number(left.season ?? 0) - Number(right.season ?? 0);
+    return seasonDifference || Number(left.episode_num ?? 0) - Number(right.episode_num ?? 0);
+  });
+  const index = ordered.findIndex((episode) => String(episode.id) === currentVodEntry?.id);
+  nextEpisode = index >= 0 ? ordered[index + 1] ?? null : null;
+  if (!nextEpisode) {
+    playerMessage.textContent = 'Playback finished.';
+    return;
+  }
+  let secondsLeft = 10;
+  const updateLabel = (): void => { nextEpisodeCountdown.textContent = `Next episode in ${secondsLeft} seconds`; };
+  nextEpisodePrompt.classList.remove('hidden');
+  updateLabel();
+  nextEpisodePlayButton.focus();
+  episodeCountdownTimer = window.setInterval(() => {
+    secondsLeft -= 1;
+    if (secondsLeft <= 0) {
+      const episode = nextEpisode;
+      stopEpisodeCountdown();
+      if (episode) void playVod(episode.title ?? `Episode ${episode.episode_num ?? ''}`.trim(), episode.id, episode.container_extension, 'series');
+      return;
+    }
+    updateLabel();
+  }, 1000);
+}
+
+function saveTrackPreferences(): void {
+  preferredAudioLanguages = audioLanguagePreferencesInput.value.split(',').map((item) => item.trim()).filter(Boolean);
+  preferredSubtitleLanguages = subtitleLanguagePreferencesInput.value.split(',').map((item) => item.trim()).filter(Boolean);
+  try {
+    localStorage.setItem(TRACK_PREFERENCES_KEY, JSON.stringify({ audio: preferredAudioLanguages, subtitles: preferredSubtitleLanguages }));
+  } catch { /* Track preferences remain active for this session. */ }
+  manualAudioTrackIndex = null;
+  manualSubtitleTrackIndex = null;
+  applyPreferredTracks();
 }
 
 function watchEntryForMovie(id: number | string): WatchProgress | undefined {
@@ -606,9 +808,11 @@ function renderContinueWatching(): void {
     }
     const title = document.createElement('span');
     title.className = 'continue-tile-title';
-    title.textContent = entry.seriesTitle
+    const fullTitle = entry.seriesTitle
       ? `${entry.seriesTitle} · S${entry.season ?? '?'} E${entry.episodeNumber ?? '?'}`
       : entry.title;
+    title.textContent = truncateCardTitle(fullTitle, 24);
+    title.title = fullTitle;
     const meta = document.createElement('span');
     meta.className = 'continue-tile-meta';
     meta.textContent = `Continue · ${playbackTime(entry.position)}`;
@@ -625,6 +829,11 @@ function renderContinueWatching(): void {
     });
     homeContinue.appendChild(button);
   }
+}
+
+function truncateCardTitle(title: string, maximum: number): string {
+  if (title.length <= maximum) return title;
+  return `${title.slice(0, Math.max(1, maximum - 1)).trimEnd()}…`;
 }
 
 function favoriteKey(kind: 'movie' | 'series', id: number | string): string {
@@ -702,7 +911,8 @@ function renderPosterRow(container: HTMLElement, kind: 'movie' | 'series', items
       button.appendChild(image);
     }
     const label = document.createElement('span');
-    label.textContent = title;
+    label.textContent = truncateCardTitle(title, 22);
+    label.title = title;
     button.appendChild(label);
     button.addEventListener('click', () => kind === 'movie' ? showMovieDetails(item as Movie) : showSeriesDetails(item as Series));
     container.appendChild(button);
@@ -761,7 +971,8 @@ function renderMyList(): void {
     }
     const label = document.createElement('span');
     label.className = 'media-card-title';
-    label.textContent = title;
+    label.textContent = truncateCardTitle(title, 30);
+    label.title = title;
     button.appendChild(label);
     button.addEventListener('click', () => movie ? showMovieDetails(movie) : showSeriesDetails(show!));
     myListItems.appendChild(button);
@@ -1148,7 +1359,8 @@ function renderChannels(append = false): void {
       }
       const title = document.createElement('span');
       title.className = 'media-card-title';
-      title.textContent = item.title;
+      title.textContent = truncateCardTitle(item.title, 30);
+      title.title = item.title;
       button.appendChild(title);
       if (item.meta) {
         const meta = document.createElement('span');
@@ -1171,6 +1383,21 @@ function renderChannels(append = false): void {
   }
 }
 
+async function fetchSeriesEpisodes(seriesId: string | number): Promise<SeriesEpisode[]> {
+  const response = await api<{ episodes?: Record<string, SeriesEpisode[]> }>('get_series_info', { series_id: String(seriesId) }, 120_000);
+  const episodes: SeriesEpisode[] = [];
+  for (const seasonKey of Object.keys(response.episodes ?? {})) {
+    for (const episode of response.episodes?.[seasonKey] ?? []) {
+      if (episode.season === undefined) episode.season = seasonKey;
+      episodes.push(episode);
+    }
+  }
+  return episodes.sort((left, right) => {
+    const seasonDifference = Number(left.season ?? 0) - Number(right.season ?? 0);
+    return seasonDifference || Number(left.episode_num ?? 0) - Number(right.episode_num ?? 0);
+  });
+}
+
 async function openSeries(item: Series): Promise<void> {
   if (!credentials) return;
   activeSeries = item;
@@ -1182,14 +1409,7 @@ async function openSeries(item: Series): Promise<void> {
   libraryMessage.classList.remove('hidden', 'error');
   libraryMessage.classList.add('loading');
   try {
-    const response = await api<{ episodes?: Record<string, SeriesEpisode[]> }>('get_series_info', { series_id: String(item.series_id) }, 120_000);
-    const episodes = response.episodes ?? {};
-    for (const seasonKey of Object.keys(episodes)) {
-      for (const episode of episodes[seasonKey] ?? []) {
-        if (episode.season === undefined) episode.season = seasonKey;
-        seriesEpisodes.push(episode);
-      }
-    }
+    seriesEpisodes = await fetchSeriesEpisodes(item.series_id);
     renderChannels();
     libraryMessage.textContent = seriesEpisodes.length ? `${seriesEpisodes.length} episodes` : 'No episodes were returned for this series.';
     libraryMessage.classList.remove('loading');
@@ -1228,6 +1448,16 @@ async function playVod(
   const movie = kind === 'movie' ? movies.find((item) => String(item.stream_id) === String(id)) : undefined;
   const episode = kind === 'series' ? seriesEpisodes.find((item) => String(item.id) === String(id)) : undefined;
   const seriesId = matchingHistory?.seriesId ?? (kind === 'series' && activeSeries ? String(activeSeries.series_id) : undefined);
+  if (kind === 'series' && seriesId && (!activeSeries || String(activeSeries.series_id) !== seriesId)) {
+    const seriesItem = series.find((item) => String(item.series_id) === seriesId);
+    if (seriesItem) {
+      activeSeries = seriesItem;
+      seriesEpisodes = [];
+      void fetchSeriesEpisodes(seriesId).then((episodes) => {
+        if (activeSeries && String(activeSeries.series_id) === seriesId) seriesEpisodes = episodes;
+      }).catch(() => { /* Continue Watching remains usable if episode metadata is unavailable. */ });
+    }
+  }
   const historyKey = matchingHistory?.key ?? (kind === 'movie' ? `${watchScope}:movie:${id}` : `${watchScope}:series:${seriesId ?? 'unknown'}:${id}`);
   const historyEntry: WatchProgress = {
     key: historyKey,
@@ -1262,6 +1492,10 @@ async function startPlayback(
 ): Promise<void> {
   saveWatchProgress(true);
   stopSeekHold();
+  stopEpisodeCountdown();
+  closeTrackMenu(false);
+  manualAudioTrackIndex = null;
+  manualSubtitleTrackIndex = null;
   playingTitle.textContent = title;
   playerMessage.textContent = 'Connecting to stream…';
   playerLayer.classList.remove('hidden');
@@ -1361,6 +1595,8 @@ function beginSeekHold(direction: -1 | 1): void {
 function closePlayer(): void {
   saveWatchProgress(true);
   stopSeekHold();
+  stopEpisodeCountdown();
+  closeTrackMenu(false);
   video.pause();
   video.removeAttribute('src');
   video.load();
@@ -1396,6 +1632,15 @@ function closeExitPrompt(): void {
 
 function handleBackPress(): void {
   if (!playerLayer.classList.contains('hidden')) {
+    if (openTrackMenu) {
+      closeTrackMenu();
+      return;
+    }
+    if (!nextEpisodePrompt.classList.contains('hidden')) {
+      stopEpisodeCountdown();
+      playerMessage.textContent = 'Episode ended.';
+      return;
+    }
     resetBackSequence();
     closePlayer();
     return;
@@ -1606,6 +1851,19 @@ previousChannelButton.addEventListener('click', () => switchChannel(-1));
 nextChannelButton.addEventListener('click', () => switchChannel(1));
 seekBackButton.addEventListener('click', () => seekBy(-10));
 seekForwardButton.addEventListener('click', () => seekBy(10));
+audioTracksButton.addEventListener('click', () => showTrackMenu('audio'));
+subtitleTracksButton.addEventListener('click', () => showTrackMenu('subtitles'));
+nextEpisodePlayButton.addEventListener('click', () => {
+  const episode = nextEpisode;
+  stopEpisodeCountdown();
+  if (episode) void playVod(episode.title ?? `Episode ${episode.episode_num ?? ''}`.trim(), episode.id, episode.container_extension, 'series');
+});
+nextEpisodeCancelButton.addEventListener('click', () => {
+  stopEpisodeCountdown();
+  playerMessage.textContent = 'Episode ended.';
+});
+audioLanguagePreferencesInput.addEventListener('change', saveTrackPreferences);
+subtitleLanguagePreferencesInput.addEventListener('change', saveTrackPreferences);
 playPauseButton.addEventListener('click', () => {
   if (video.paused) void video.play().catch(() => { playerMessage.textContent = 'Playback could not resume.'; });
   else { video.pause(); saveWatchProgress(true); }
@@ -1615,7 +1873,11 @@ seekBar.addEventListener('input', () => {
   if (!Number.isFinite(duration) || duration <= 0) return;
   try { video.currentTime = (Number(seekBar.value) / Number(seekBar.max)) * duration; } catch { /* The stream may not expose a seekable range. */ }
 });
-video.addEventListener('loadedmetadata', updateSeekControls);
+video.addEventListener('loadedmetadata', () => {
+  updateSeekControls();
+  observeAvailableTracks();
+  applyPreferredTracks();
+});
 video.addEventListener('durationchange', updateSeekControls);
 video.addEventListener('timeupdate', () => {
   updateSeekControls();
@@ -1625,7 +1887,7 @@ video.addEventListener('playing', () => { playerMessage.textContent = ''; update
 video.addEventListener('pause', () => updatePlayPauseControl(false));
 video.addEventListener('ended', () => {
   saveWatchProgress(true, true);
-  playerMessage.textContent = 'Playback finished.';
+  startEpisodeCountdown();
 });
 video.addEventListener('seeked', updateSeekControls);
 video.addEventListener('waiting', () => { playerMessage.textContent = 'Buffering…'; });
@@ -1650,6 +1912,8 @@ window.addEventListener('keydown', (event) => {
     }
   }
   const isSearchVertical = target === searchInput && (event.keyCode === 38 || event.keyCode === 40);
+  const isPreferenceVertical = (target === audioLanguagePreferencesInput || target === subtitleLanguagePreferencesInput)
+    && (event.keyCode === 38 || event.keyCode === 40);
   const isEmptySearchNavigation = target === searchInput && !searchInput.value.trim();
   const isTextEntry = !!target && ((target.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((target as HTMLInputElement).type))
     || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
@@ -1659,8 +1923,8 @@ window.addEventListener('keydown', (event) => {
       (event.keyCode === 39 ? categorySelect : catalogTypeSelect).focus();
       return;
     }
-    if ((!isTextEntry || isSearchVertical || isEmptySearchNavigation) && moveDirectionalFocus(event.keyCode)) { event.preventDefault(); return; }
-    if (isSearchVertical) { event.preventDefault(); return; }
+    if ((!isTextEntry || isSearchVertical || isPreferenceVertical || isEmptySearchNavigation) && moveDirectionalFocus(event.keyCode)) { event.preventDefault(); return; }
+    if (isSearchVertical || isPreferenceVertical) { event.preventDefault(); return; }
     if (isEmptySearchNavigation) { event.preventDefault(); return; }
     if (!isTextEntry && currentPage === 'settings') { event.preventDefault(); return; }
   }
@@ -1719,6 +1983,13 @@ try {
   sidebar.classList.toggle('collapsed', localStorage.getItem('nextflix.sidebar-collapsed.v1') === 'true');
 } catch { /* Defaults are used when local storage is unavailable. */ }
 loadWatchHistory();
+try {
+  const savedTrackPreferences = JSON.parse(localStorage.getItem(TRACK_PREFERENCES_KEY) ?? 'null') as { audio?: unknown; subtitles?: unknown } | null;
+  if (Array.isArray(savedTrackPreferences?.audio)) preferredAudioLanguages = savedTrackPreferences.audio.map(String).filter(Boolean);
+  if (Array.isArray(savedTrackPreferences?.subtitles)) preferredSubtitleLanguages = savedTrackPreferences.subtitles.map(String).filter(Boolean);
+} catch { /* Use the built-in language preference order. */ }
+audioLanguagePreferencesInput.value = preferredAudioLanguages.join(',');
+subtitleLanguagePreferencesInput.value = preferredSubtitleLanguages.join(',');
 
 const savedProvider = readSavedProvider();
 const localProvider = {

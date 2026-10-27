@@ -33,9 +33,11 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 - Seek VOD with the focused progress slider or remote Left/Right; short presses skip 10 seconds and holding accelerates seeking. When another player control is focused, Left/Right moves focus between controls instead.
 - In the catalogue toolbar, Search Left/Right moves directly to Browse/Category. Toolbar controls have increased spacing.
 - Save local VOD resume progress and show a Continue Watching row on Home. Movie details offer Resume and Start from beginning.
+- Restore focus to the selected language filter after the results refresh; bound Home, catalogue, and My List card titles with a visible ellipsis.
+- Set ordered preferred audio/subtitle language codes in Settings and select tracks exposed by the TV media element. Users can choose tracks manually or turn subtitles off.
+- Offer a cancellable 10-second next-episode countdown when the current series episode ends and the next episode is available in the loaded series list.
 - Use a full-screen player overlay with a top back arrow and white icon controls; VOD shows 10-second skip controls and Live TV shows previous/next channel controls.
 - Navigate closed dropdowns with the D-pad; press OK to open one, use Up/Down within its options, and Left/Right to move focus away.
-- Keep extra spacing between catalogue filters and search; long movie and series titles on Home truncate with an ellipsis.
 - Use locally stored playback progress only; no stream URLs or provider credentials are stored in watch history.
 - Navigate with directional remote keys and get focus return when closing title details.
 - Require three Back presses on Home before showing the exit confirmation; Back closes the player or returns to Home from a subpage.
@@ -76,7 +78,9 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - The channel cache uses IndexedDB and stores rebuildable provider catalogue data, not IPTV credentials. If IndexedDB is unavailable, the app still connects but cannot show the catalogue offline.
 - Remembered credentials use unencrypted app local storage on the TV. The password is visible in this test build.
 - This project targets one IPTV provider at a time; multi-provider merging is intentionally out of scope.
-- Profiles, EPG, catch-up, audio/subtitle track selection and preferences, series autoplay, source failover, and local pairing are not implemented yet.
+- Profiles, EPG, catch-up, external subtitle loading, source failover, and local pairing are not implemented yet.
+- Audio/subtitle controls depend on tracks exposed to the ordinary HTML media element by the stream and webOS browser. Multilingual track selection and episode autoplay still need verification on the target TV.
+- An intermittent black screen after returning to NextFlix from Home was reported; it has not been reproduced or verified fixed yet.
 
 ## Checklist
 
@@ -91,3 +95,4 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - [x] User verified movie and series playback on the target TV.
 - [ ] Test Phase 3 sidebar, detail/search/dropdown focus, filter spacing, poster sizing, My List, category and language filters, and three-press exit on the TV.
 - [ ] Test Phase 4 player icon controls, VOD seeking, resume position, and progress cleanup on completion on the TV.
+- [ ] Test language-filter focus restoration, card-title truncation, audio/subtitle selection, preferred-language behavior, and series autoplay on the TV.
