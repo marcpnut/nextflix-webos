@@ -1,4 +1,4 @@
-# NextFlix — Phase 3 preview
+# NextFlix — Phase 4 in progress
 
 Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 
@@ -29,7 +29,10 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 - Show a featured title and poster rows on Home; open title details before playback.
 - Save movies and series to a local My List.
 - Hide and restore provider categories; hidden categories are excluded from browsing, Home, and search.
-- Filter Live TV, Movies, Series, and Settings by language codes in category names (`NL/PL | ...` or `|NL| ...`); show only language tags actually present for each catalog, with flag emoji where supported. The language filter is hidden on Home.
+- Filter Live TV, Movies, Series, and Settings using the literal text before `|` or between the first two pipes (for example, `NL/PL | ...` or `|NL| ...`). Options are derived from category names; the filter is hidden on Home.
+- Seek VOD with the progress slider or remote Left/Right; short presses skip 10 seconds and holding accelerates seeking.
+- Save local VOD resume progress and show a Continue Watching row on Home. Movie details offer Resume and Start from beginning.
+- Use locally stored playback progress only; no stream URLs or provider credentials are stored in watch history.
 - Navigate with directional remote keys and get focus return when closing title details.
 - Require three Back presses on Home before showing the exit confirmation; Back closes the player or returns to Home from a subpage.
 
@@ -69,7 +72,7 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - The channel cache uses IndexedDB and stores rebuildable provider catalogue data, not IPTV credentials. If IndexedDB is unavailable, the app still connects but cannot show the catalogue offline.
 - Remembered credentials use unencrypted app local storage on the TV. The password is visible in this test build.
 - This project targets one IPTV provider at a time; multi-provider merging is intentionally out of scope.
-- Profiles, EPG, catch-up, subtitles/audio-track selection, and local pairing are not implemented yet.
+- Profiles, EPG, catch-up, audio/subtitle track selection and preferences, series autoplay, source failover, and local pairing are not implemented yet.
 
 ## Checklist
 
@@ -82,4 +85,5 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - [x] Publish the versioned IPK release asset.
 - [x] User verified provider login, live-channel loading, and playback on the target TV.
 - [x] User verified movie and series playback on the target TV.
-- [ ] Test Phase 3 sidebar, detail focus, card spacing/poster sizing, My List, category and language filters, and three-press exit on the TV.
+- [ ] Test Phase 3 sidebar, detail/search focus, dropdown styling, poster sizing, My List, category and language filters, and three-press exit on the TV.
+- [ ] Test Phase 4 VOD seeking, resume position, and progress cleanup on completion on the TV.

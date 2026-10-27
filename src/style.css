@@ -31,6 +31,8 @@ h1 { margin: 10px 0 8px; font-size: 36px; }
 form { display: grid; gap: 20px; }
 label { display: grid; gap: 9px; font-size: 17px; color: #d5d5dc; }
 input, select { width: 100%; padding: 0 16px; border: 1px solid #474a56; background: #101116; color: #fff; }
+select { -webkit-appearance: none; appearance: none; padding-right: 48px; border-color: #484b58; border-radius: 10px; background-color: #252832; background-image: linear-gradient(45deg, transparent 50%, #f04455 50%), linear-gradient(135deg, #f04455 50%, transparent 50%); background-position: calc(100% - 22px) 24px, calc(100% - 16px) 24px; background-repeat: no-repeat; background-size: 7px 7px; }
+select option { color: #fff; background: #1c1e27; }
 .credentials { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .password-control { display: grid; gap: 9px; font-size: 17px; color: #d5d5dc; }
 .password-field { display: flex; gap: 10px; }
@@ -63,9 +65,8 @@ input, select { width: 100%; padding: 0 16px; border: 1px solid #474a56; backgro
 .sidebar.collapsed .nav-button > span { display: none; }
 .app-content { flex: 1; min-width: 0; height: 100%; overflow-y: auto; padding: 38px 48px 64px; }
 .language-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 22px; }
-.language-choice { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 52px; padding: 0 16px; border-color: #4a4c58; background: #292c36; font-size: 17px; }
+.language-choice { display: inline-flex; align-items: center; justify-content: center; min-height: 52px; padding: 0 20px; border-color: #4a4c58; background: #292c36; font-size: 17px; }
 .language-choice.selected { border-color: #f04455; background: #38313a; }
-.language-flag { font-size: 25px; line-height: 1; }
 .library { max-width: 1440px; margin: 0 auto; }
 .library-heading { display: flex; justify-content: space-between; align-items: end; margin-bottom: 26px; }
 .library-heading h1 { margin-bottom: 0; }
@@ -93,9 +94,15 @@ input, select { width: 100%; padding: 0 16px; border: 1px solid #474a56; backgro
 .home-row { margin: 0 0 36px; }
 .home-row h2 { margin: 0 0 16px; font-size: 25px; }
 .poster-row { display: flex; overflow-x: auto; padding: 8px 10px 18px; scroll-behavior: smooth; }
-.poster-tile { flex: 0 0 190px; width: 190px; min-width: 190px; max-width: 190px; min-height: 285px; height: auto; display: flex; flex-direction: column; gap: 8px; margin: 0 24px 0 0; padding: 8px; overflow: hidden; text-align: left; }
-.poster-tile img { display: block; width: 94%; max-width: 100%; min-width: 0; height: 210px; margin: 0 auto; object-fit: cover; background: #323541; }
+.poster-tile { flex: 0 0 200px; width: 200px; min-width: 200px; max-width: 200px; min-height: 300px; height: auto; display: flex; flex-direction: column; gap: 8px; margin: 0 24px 0 0; padding: 9px; overflow: hidden; text-align: left; }
+.poster-tile img { display: block; width: 90%; max-width: 100%; min-width: 0; height: 205px; margin: 0 auto; object-fit: cover; background: #323541; }
 .poster-tile span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.continue-tile { flex: 0 0 220px; width: 220px; min-width: 220px; max-width: 220px; min-height: 225px; height: auto; display: flex; flex-direction: column; align-items: stretch; gap: 8px; margin: 0 20px 0 0; padding: 9px; overflow: hidden; text-align: left; }
+.continue-tile img { width: 100%; height: 145px; object-fit: cover; background: #323541; }
+.continue-tile-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.continue-tile-meta { color: #a4a5b2; font-size: 14px; }
+.continue-progress { height: 5px; overflow: hidden; border-radius: 3px; background: #62636d; }
+.continue-progress span { display: block; height: 100%; background: #f04455; }
 .detail-back { margin-bottom: 28px; }
 .detail-layout { display: grid; grid-template-columns: minmax(240px, 360px) 1fr; gap: 42px; align-items: start; }
 .detail-poster { width: 100%; max-height: 540px; object-fit: contain; background: #1c1e27; }
@@ -115,6 +122,9 @@ input, select { width: 100%; padding: 0 16px; border: 1px solid #474a56; backgro
 .player-bottom { bottom: 0; flex-direction: column; align-items: stretch; gap: 16px; background: linear-gradient(transparent, #000d); font-size: 18px; }
 .player-controls { display: flex; justify-content: center; gap: 16px; }
 .player-button { min-width: 155px; background: #1c1e27e8; }
+.seek-row { display: flex; align-items: center; gap: 18px; min-height: 42px; }
+.seek-row > span { min-width: 62px; font-variant-numeric: tabular-nums; }
+.seek-row input[type="range"] { min-width: 0; height: 16px; min-height: 32px; padding: 0; accent-color: #f04455; background: transparent; }
 .dialog-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; background: #000b; }
 .dialog-backdrop.hidden { display: none; }
 .confirm-dialog { width: min(620px, 86vw); padding: 36px; border: 1px solid #4a4c58; border-radius: 18px; background: #1c1e27; box-shadow: 0 20px 70px #000b; }

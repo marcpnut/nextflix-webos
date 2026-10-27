@@ -54,6 +54,8 @@ const heroPlayButton = $('hero-play') as HTMLButtonElement;
 const heroBrowseButton = $('hero-browse') as HTMLButtonElement;
 const homeMovies = $('home-movies');
 const homeSeries = $('home-series');
+const homeContinue = $('home-continue');
+const continueRow = $('continue-row');
 const languageFilter = $('language-filter');
 const detailPoster = $('detail-poster') as HTMLImageElement;
 const detailKind = $('detail-kind');
@@ -62,6 +64,7 @@ const detailMeta = $('detail-meta');
 const detailDescription = $('detail-description');
 const detailPlayButton = $('detail-play') as HTMLButtonElement;
 const detailListButton = $('detail-list') as HTMLButtonElement;
+const detailStartOverButton = $('detail-start-over') as HTMLButtonElement;
 const settingsCategoryType = $('settings-category-type') as HTMLSelectElement;
 const categoryVisibilityList = $('category-visibility-list');
 const categorySelect = $('category') as HTMLSelectElement;
@@ -79,16 +82,21 @@ const video = $('video') as HTMLVideoElement;
 const playerMessage = $('player-message');
 const playingTitle = $('playing-title');
 const playPauseButton = $('play-pause') as HTMLButtonElement;
+const seekRow = $('seek-row');
+const seekBar = $('seek-bar') as HTMLInputElement;
+const seekCurrent = $('seek-current');
+const seekDuration = $('seek-duration');
 
 const PAGE_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.3.3';
+const APP_VERSION = '0.3.5';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
 let credentials: { base: string; username: string; password: string } | null = null;
 let playbackBase: string | null = null;
+let watchScope = 'default';
 let allowedLiveFormats: string[] = [];
 let activeLiveFormat: string | null = null;
 let categories: Category[] = [];
@@ -111,6 +119,27 @@ let languageFilterKey = 'nextflix.language-filter.v1';
 let activeLanguageFilters: Record<CatalogView, string> = { live: 'all', movies: 'all', series: 'all' };
 let favorites = new Set<string>();
 const FAVORITES_KEY = 'nextflix.my-list.v1';
+const WATCH_HISTORY_KEY = 'nextflix.watch-history.v1';
+type WatchProgress = {
+  key: string;
+  scope: string;
+  kind: 'movie' | 'series';
+  id: string;
+  title: string;
+  extension: string;
+  poster?: string;
+  categoryId?: string;
+  seriesId?: string;
+  seriesTitle?: string;
+  season?: string;
+  episodeNumber?: string;
+  position: number;
+  duration: number;
+  updatedAt: number;
+};
+let watchHistory: WatchProgress[] = [];
+let currentVodEntry: WatchProgress | null = null;
+let lastProgressWrite = 0;
 let searchTimer = 0;
 let sourceType: 'xtream' | 'm3u' = 'xtream';
 let visibleChannels: Channel[] = [];
@@ -120,6 +149,10 @@ let requestController: AbortController | null = null;
 let backPressCount = 0;
 let backPressResetTimer = 0;
 let backHintTimer = 0;
+let seekHoldTimer = 0;
+let seekHoldDirection: -1 | 1 | 0 = 0;
+let seekHoldStartedAt = 0;
+let seekHoldLastSignal = 0;
 
 function setMessage(text: string, isError = false): void {
   message.textContent = text;
@@ -368,41 +401,20 @@ function categoriesForView(): Category[] {
   return categoriesFor(catalogView);
 }
 
-const LANGUAGE_LABELS: Record<string, string> = {
-  AL: 'Albanian', AR: 'Arabic', BG: 'Bulgarian', BR: 'Brazilian Portuguese', BA: 'Bosnian', CN: 'Chinese',
-  HR: 'Croatian', CZ: 'Czech', DK: 'Danish', NL: 'Dutch', EN: 'English', UK: 'English', EE: 'Estonian',
-  FA: 'Persian', FI: 'Finnish', FR: 'French', DE: 'German', GR: 'Greek', EL: 'Greek', HE: 'Hebrew',
-  HI: 'Hindi', HU: 'Hungarian', ID: 'Indonesian', IT: 'Italian', JP: 'Japanese', JA: 'Japanese',
-  KR: 'Korean', KO: 'Korean', LV: 'Latvian', LT: 'Lithuanian', MK: 'Macedonian', MS: 'Malay',
-  NO: 'Norwegian', PL: 'Polish', PT: 'Portuguese', RO: 'Romanian', RU: 'Russian', RS: 'Serbian',
-  SK: 'Slovak', SI: 'Slovenian', ES: 'Spanish', SE: 'Swedish', TH: 'Thai', TR: 'Turkish',
-  UA: 'Ukrainian', VI: 'Vietnamese', MULTI: 'Multiple languages'
-};
-
-function languageTags(categoryName: string | undefined): string[] {
-  if (!categoryName || categoryName.indexOf('|') < 0) return [];
+function categoryLanguageTag(categoryName: string | undefined): string {
+  if (!categoryName || categoryName.indexOf('|') < 0) return '';
   const segments = categoryName.trim().split('|');
   const tagSegment = segments[0].trim() ? segments[0] : segments[1] ?? '';
-  const prefix = tagSegment.trim().toUpperCase();
-  const leadingTags = prefix.match(/^(?:MULTI|[A-Z]{2})(?=$|[\s/,;+&-])(?:\s*[/,+&]\s*(?:MULTI|[A-Z]{2})(?=$|[\s/,;+&-]))*/);
-  if (!leadingTags) return [];
-  const ignored = new Set(['HD', 'SD', 'TV', 'IP', '4K', 'VOD']);
-  return (leadingTags[0].match(/MULTI|[A-Z]{2}/g) ?? []).filter((code) => !ignored.has(code));
+  return tagSegment.trim();
 }
 
 function languagesForView(view: CatalogView): string[] {
-  const found = new Set<string>();
+  const found = new Map<string, string>();
   for (const category of categoriesFor(view)) {
-    for (const code of languageTags(category.category_name)) found.add(code);
+    const tag = categoryLanguageTag(category.category_name);
+    if (tag && !found.has(tag.toUpperCase())) found.set(tag.toUpperCase(), tag);
   }
-  return Array.from(found).sort((left, right) => left === 'MULTI' ? 1 : right === 'MULTI' ? -1 : left.localeCompare(right));
-}
-
-function languageFlag(code: string): string {
-  if (code === 'MULTI') return '🌐';
-  const region = ({ EN: 'GB', UK: 'GB', EL: 'GR', JA: 'JP', KO: 'KR', CN: 'CN' } as Record<string, string>)[code] ?? code;
-  if (!/^[A-Z]{2}$/.test(region)) return '🌐';
-  return String.fromCodePoint(0x1f1e6 + region.charCodeAt(0) - 65, 0x1f1e6 + region.charCodeAt(1) - 65);
+  return Array.from(found.values()).sort((left, right) => left.localeCompare(right));
 }
 
 function selectedLanguageView(): CatalogView {
@@ -420,28 +432,17 @@ function renderLanguageFilter(): void {
   if (activeLanguageFilters[view] !== 'all' && available.indexOf(activeLanguageFilters[view]) < 0) {
     activeLanguageFilters[view] = 'all';
   }
-  const options = ['all', ...available];
-  for (const code of options) {
+  const options = [{ value: 'all', label: 'All' }, ...available.map((label) => ({ value: label.toUpperCase(), label }))];
+  for (const option of options) {
     const button = document.createElement('button');
     button.type = 'button';
-    button.className = `language-choice${activeLanguageFilters[view] === code ? ' selected' : ''}`;
-    button.setAttribute('aria-pressed', String(activeLanguageFilters[view] === code));
-    const name = code === 'all' ? 'All languages' : `${LANGUAGE_LABELS[code] ?? code} (${code})`;
-    button.setAttribute('aria-label', name);
-    button.title = name;
-    if (code === 'all') {
-      button.textContent = 'All';
-    } else {
-      const flag = document.createElement('span');
-      flag.className = 'language-flag';
-      flag.textContent = languageFlag(code);
-      const label = document.createElement('span');
-      label.textContent = code;
-      button.appendChild(flag);
-      button.appendChild(label);
-    }
+    button.className = `language-choice${activeLanguageFilters[view] === option.value ? ' selected' : ''}`;
+    button.setAttribute('aria-pressed', String(activeLanguageFilters[view] === option.value));
+    button.setAttribute('aria-label', option.value === 'all' ? 'All languages' : option.label);
+    button.title = option.label;
+    button.textContent = option.label;
     button.addEventListener('click', () => {
-      activeLanguageFilters[view] = code;
+      activeLanguageFilters[view] = option.value;
       try { localStorage.setItem(languageFilterKey, JSON.stringify(activeLanguageFilters)); } catch { /* Session-only filter selection. */ }
       renderLanguageFilter();
       if (currentPage === 'settings') {
@@ -464,7 +465,7 @@ function isCategoryVisible(view: CatalogView, categoryId: string | number | unde
   const language = activeLanguageFilters[view];
   if (language === 'all') return true;
   const category = categoriesFor(view).find((item) => String(item.category_id ?? '') === String(categoryId ?? ''));
-  return !!category && languageTags(category.category_name).indexOf(language) >= 0;
+  return !!category && categoryLanguageTag(category.category_name).toUpperCase() === language;
 }
 
 function saveHiddenCategories(): void {
@@ -500,6 +501,111 @@ function loadHiddenCategories(key: string): void {
   }
 }
 
+function loadWatchHistory(): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem(WATCH_HISTORY_KEY) ?? '[]') as unknown;
+    watchHistory = Array.isArray(saved)
+      ? (saved as WatchProgress[]).filter((entry) => entry && (entry.kind === 'movie' || entry.kind === 'series')
+        && typeof entry.scope === 'string' && typeof entry.id === 'string' && typeof entry.title === 'string'
+        && Number.isFinite(entry.position) && Number.isFinite(entry.duration) && entry.duration > 0)
+        .sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 40)
+      : [];
+  } catch {
+    watchHistory = [];
+  }
+}
+
+function persistWatchHistory(): void {
+  try { localStorage.setItem(WATCH_HISTORY_KEY, JSON.stringify(watchHistory)); } catch { /* Resume data stays in memory if storage is full. */ }
+}
+
+function playbackTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const whole = Math.floor(seconds);
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor((whole % 3600) / 60);
+  const secs = whole % 60;
+  return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}` : `${minutes}:${String(secs).padStart(2, '0')}`;
+}
+
+function watchEntryForMovie(id: number | string): WatchProgress | undefined {
+  return watchHistory.find((entry) => entry.scope === watchScope && entry.kind === 'movie' && entry.id === String(id));
+}
+
+function updateSeekControls(): void {
+  const duration = video.duration;
+  const canSeek = Number.isFinite(duration) && duration > 0;
+  seekRow.classList.toggle('hidden', !canSeek);
+  if (!canSeek) return;
+  const current = Math.max(0, Math.min(video.currentTime || 0, duration));
+  seekCurrent.textContent = playbackTime(current);
+  seekDuration.textContent = playbackTime(duration);
+  seekBar.value = String(Math.round((current / duration) * Number(seekBar.max)));
+}
+
+function saveWatchProgress(force = false, completed = false): void {
+  if (!currentVodEntry) return;
+  const duration = video.duration;
+  const position = video.currentTime;
+  if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(position)) return;
+  const now = Date.now();
+  if (!force && now - lastProgressWrite < 12000) return;
+  lastProgressWrite = now;
+  const existing = watchHistory.find((entry) => entry.key === currentVodEntry?.key);
+  if (completed || position >= duration * 0.92) {
+    watchHistory = watchHistory.filter((entry) => entry.key !== currentVodEntry?.key);
+  } else {
+    if (position < 8 && !existing) return;
+    const entry: WatchProgress = { ...currentVodEntry, position, duration, updatedAt: now };
+    currentVodEntry = entry;
+    watchHistory = [entry, ...watchHistory.filter((item) => item.key !== entry.key)]
+      .sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 40);
+  }
+  persistWatchHistory();
+  if (currentPage === 'home') renderContinueWatching();
+}
+
+function renderContinueWatching(): void {
+  clearChildren(homeContinue);
+  const entries = watchHistory.filter((entry) => entry.scope === watchScope)
+    .sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 12);
+  continueRow.classList.toggle('hidden', entries.length === 0);
+  for (const entry of entries) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'continue-tile';
+    button.setAttribute('aria-label', `Resume ${entry.title} at ${playbackTime(entry.position)}`);
+    if (entry.poster) {
+      const image = document.createElement('img');
+      image.src = entry.poster;
+      image.alt = '';
+      image.setAttribute('loading', 'lazy');
+      image.addEventListener('error', () => image.classList.add('hidden'));
+      button.appendChild(image);
+    }
+    const title = document.createElement('span');
+    title.className = 'continue-tile-title';
+    title.textContent = entry.seriesTitle
+      ? `${entry.seriesTitle} · S${entry.season ?? '?'} E${entry.episodeNumber ?? '?'}`
+      : entry.title;
+    const meta = document.createElement('span');
+    meta.className = 'continue-tile-meta';
+    meta.textContent = `Continue · ${playbackTime(entry.position)}`;
+    const progress = document.createElement('div');
+    progress.className = 'continue-progress';
+    const progressFill = document.createElement('span');
+    progressFill.style.width = `${Math.max(0, Math.min(100, (entry.position / entry.duration) * 100))}%`;
+    progress.appendChild(progressFill);
+    button.appendChild(title);
+    button.appendChild(meta);
+    button.appendChild(progress);
+    button.addEventListener('click', () => {
+      void playVod(entry.title, entry.id, entry.extension, entry.kind, { historyEntry: entry });
+    });
+    homeContinue.appendChild(button);
+  }
+}
+
 function favoriteKey(kind: 'movie' | 'series', id: number | string): string {
   return `${kind}:${id}`;
 }
@@ -528,7 +634,9 @@ function showMovieDetails(item: Movie): void {
   detailDescription.textContent = item.plot ?? 'No description supplied by the provider.';
   detailPoster.src = item.stream_icon ?? '';
   detailPoster.classList.toggle('hidden', !item.stream_icon);
-  detailPlayButton.textContent = 'Play movie';
+  const resumeEntry = watchEntryForMovie(item.stream_id);
+  detailPlayButton.textContent = resumeEntry ? `Resume · ${playbackTime(resumeEntry.position)}` : 'Play movie';
+  detailStartOverButton.classList.toggle('hidden', !resumeEntry);
   detailListButton.textContent = favorites.has(favoriteKey('movie', item.stream_id)) ? 'Remove from My List' : 'Add to My List';
   showPage('detail');
   detailPlayButton.focus();
@@ -547,6 +655,7 @@ function showSeriesDetails(item: Series): void {
   detailPoster.src = item.cover ?? '';
   detailPoster.classList.toggle('hidden', !item.cover);
   detailPlayButton.textContent = 'View episodes';
+  detailStartOverButton.classList.add('hidden');
   detailListButton.textContent = favorites.has(favoriteKey('series', item.series_id)) ? 'Remove from My List' : 'Add to My List';
   showPage('detail');
   detailPlayButton.focus();
@@ -605,6 +714,7 @@ function renderHome(): void {
   }
   renderPosterRow(homeMovies, 'movie', movies.slice().sort((a, b) => Number(b.added ?? 0) - Number(a.added ?? 0)));
   renderPosterRow(homeSeries, 'series', series);
+  renderContinueWatching();
 }
 
 function renderMyList(): void {
@@ -649,7 +759,7 @@ function renderCategorySettings(): void {
   const language = activeLanguageFilters[view];
   for (const category of categoriesFor(view)) {
     if (category.category_id === undefined || !category.category_name) continue;
-    if (language !== 'all' && languageTags(category.category_name).indexOf(language) < 0) continue;
+    if (language !== 'all' && categoryLanguageTag(category.category_name).toUpperCase() !== language) continue;
     const label = document.createElement('label');
     label.className = 'category-visibility-item';
     const checkbox = document.createElement('input');
@@ -831,6 +941,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     if (sourceType === 'xtream' && (!username || !password)) throw new Error('Enter both username and password.');
     credentials = { base, username, password };
     cacheKey = sourceType === 'm3u' ? m3uCatalogKey(base) : catalogKey(base, username);
+    watchScope = m3uCatalogKey(cacheKey);
     loadHiddenCategories(cacheKey);
 
     try {
@@ -1080,24 +1191,81 @@ async function playChannel(channel: Channel): Promise<void> {
   await startPlayback(channel.name ?? 'Live TV', `${playbackBase ?? credentials.base}/${path}`, channel);
 }
 
-async function playVod(title: string, id: number | string, extension: string | undefined, kind: 'movie' | 'series'): Promise<void> {
+async function playVod(
+  title: string,
+  id: number | string,
+  extension: string | undefined,
+  kind: 'movie' | 'series',
+  options: { historyEntry?: WatchProgress; fromBeginning?: boolean } = {}
+): Promise<void> {
   if (!credentials) return;
   const safeExtension = extension && /^[a-z0-9]{1,8}$/i.test(extension) ? extension : 'mp4';
+  const matchingHistory = options.historyEntry ?? watchHistory.find((entry) => entry.kind === kind
+    && entry.scope === watchScope
+    && entry.id === String(id)
+    && (kind !== 'series' || !activeSeries || entry.seriesId === String(activeSeries.series_id)));
+  const movie = kind === 'movie' ? movies.find((item) => String(item.stream_id) === String(id)) : undefined;
+  const episode = kind === 'series' ? seriesEpisodes.find((item) => String(item.id) === String(id)) : undefined;
+  const seriesId = matchingHistory?.seriesId ?? (kind === 'series' && activeSeries ? String(activeSeries.series_id) : undefined);
+  const historyKey = matchingHistory?.key ?? (kind === 'movie' ? `${watchScope}:movie:${id}` : `${watchScope}:series:${seriesId ?? 'unknown'}:${id}`);
+  const historyEntry: WatchProgress = {
+    key: historyKey,
+    scope: watchScope,
+    kind,
+    id: String(id),
+    title,
+    extension: safeExtension,
+    poster: matchingHistory?.poster ?? movie?.stream_icon ?? episode?.info?.movie_image,
+    categoryId: matchingHistory?.categoryId ?? (movie?.category_id === undefined ? undefined : String(movie.category_id)),
+    seriesId,
+    seriesTitle: matchingHistory?.seriesTitle ?? activeSeries?.name,
+    season: matchingHistory?.season ?? (episode?.season === undefined ? undefined : String(episode.season)),
+    episodeNumber: matchingHistory?.episodeNumber ?? (episode?.episode_num === undefined ? undefined : String(episode.episode_num)),
+    position: matchingHistory?.position ?? 0,
+    duration: matchingHistory?.duration ?? 0,
+    updatedAt: matchingHistory?.updatedAt ?? Date.now()
+  };
   const path = [kind, credentials.username, credentials.password, `${id}.${safeExtension}`]
     .map((part) => encodeURIComponent(part)).join('/');
-  await startPlayback(title, `${playbackBase ?? credentials.base}/${path}`, null);
+  await startPlayback(title, `${playbackBase ?? credentials.base}/${path}`, null, {
+    entry: historyEntry,
+    position: options.fromBeginning ? 0 : matchingHistory?.position ?? 0
+  });
 }
 
-async function startPlayback(title: string, url: string, channel: Channel | null): Promise<void> {
-  selectedChannel = channel;
+async function startPlayback(
+  title: string,
+  url: string,
+  channel: Channel | null,
+  resume?: { entry: WatchProgress; position: number }
+): Promise<void> {
+  saveWatchProgress(true);
+  stopSeekHold();
   playingTitle.textContent = title;
   playerMessage.textContent = 'Connecting to stream…';
   playerLayer.classList.remove('hidden');
+  seekRow.classList.add('hidden');
   playPauseButton.textContent = 'Pause';
   video.pause();
   video.removeAttribute('src');
   video.load();
+  selectedChannel = channel;
+  currentVodEntry = resume?.entry ?? null;
+  lastProgressWrite = 0;
   video.src = url;
+  if (resume && resume.position > 0) {
+    const entry = resume.entry;
+    video.addEventListener('loadedmetadata', () => {
+      if (currentVodEntry?.key !== entry.key || !Number.isFinite(video.duration) || video.duration <= 0) return;
+      try {
+        video.currentTime = Math.min(resume.position, Math.max(0, video.duration - 2));
+      } catch {
+        // Some streams report duration but do not expose a seekable range.
+      }
+      updateSeekControls();
+      playerMessage.textContent = `Resuming at ${playbackTime(video.currentTime)}`;
+    }, { once: true });
+  }
   video.load();
   try {
     await video.play();
@@ -1122,12 +1290,62 @@ function describePlaybackFailure(error?: unknown): string {
   return 'Playback did not start. Try the other live format or another channel.';
 }
 
+function seekBy(seconds: number): void {
+  const duration = video.duration;
+  if (!Number.isFinite(duration) || duration <= 0) {
+    playerMessage.textContent = 'Seeking is not available for this live stream.';
+    return;
+  }
+  const target = Math.max(0, Math.min(duration, video.currentTime + seconds));
+  try {
+    video.currentTime = target;
+    seekCurrent.textContent = playbackTime(target);
+    seekBar.value = String(Math.round((target / duration) * Number(seekBar.max)));
+    playerMessage.textContent = `Seeking to ${playbackTime(target)}`;
+  } catch {
+    playerMessage.textContent = 'This stream cannot seek to that position.';
+  }
+}
+
+function stopSeekHold(): void {
+  if (seekHoldTimer) window.clearInterval(seekHoldTimer);
+  seekHoldTimer = 0;
+  seekHoldDirection = 0;
+}
+
+function beginSeekHold(direction: -1 | 1): void {
+  const now = Date.now();
+  if (seekHoldTimer && seekHoldDirection === direction) {
+    seekHoldLastSignal = now;
+    return;
+  }
+  stopSeekHold();
+  seekHoldDirection = direction;
+  seekHoldStartedAt = now;
+  seekHoldLastSignal = now;
+  seekBy(direction * 10);
+  seekHoldTimer = window.setInterval(() => {
+    const tick = Date.now();
+    if (tick - seekHoldLastSignal > 450) {
+      stopSeekHold();
+      return;
+    }
+    const heldFor = tick - seekHoldStartedAt;
+    const step = heldFor > 3500 ? 60 : heldFor > 2000 ? 30 : heldFor > 1000 ? 20 : 10;
+    seekBy(seekHoldDirection * step);
+  }, 350);
+}
+
 function closePlayer(): void {
+  saveWatchProgress(true);
+  stopSeekHold();
   video.pause();
   video.removeAttribute('src');
   video.load();
   playerLayer.classList.add('hidden');
   playerMessage.textContent = '';
+  currentVodEntry = null;
+  seekRow.classList.add('hidden');
   selectedChannel = null;
   if (!librarySection.classList.contains('hidden')) channelList.querySelector<HTMLButtonElement>('button')?.focus();
   else if (!detailView.classList.contains('hidden')) detailPlayButton.focus();
@@ -1196,13 +1414,17 @@ function exitApplication(): void {
 function moveDirectionalFocus(keyCode: number): boolean {
   const active = document.activeElement as HTMLElement | null;
   if (!active || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || active.isContentEditable) return false;
-  if (active.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((active as HTMLInputElement).type)) return false;
+  const vertical = keyCode === 38 || keyCode === 40;
+  const emptySearch = active === searchInput && !searchInput.value.trim();
+  if (active.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'range'].includes((active as HTMLInputElement).type)
+    && !((active as HTMLInputElement).type === 'search' && (vertical || emptySearch))) return false;
   const current = active.getBoundingClientRect();
   const x = current.left + current.width / 2;
   const y = current.top + current.height / 2;
   let best: HTMLElement | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
-  const scope: ParentNode = exitConfirm.classList.contains('hidden') ? document : exitConfirm;
+  const scope: ParentNode = !playerLayer.classList.contains('hidden') ? playerLayer
+    : exitConfirm.classList.contains('hidden') ? document : exitConfirm;
   const candidates = scope.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled])');
   for (const candidate of Array.from(candidates)) {
     if (candidate === active || candidate.closest('.hidden')) continue;
@@ -1215,6 +1437,13 @@ function moveDirectionalFocus(keyCode: number): boolean {
     const secondary = keyCode === 37 || keyCode === 39 ? Math.abs(dy) : Math.abs(dx);
     const score = primary + secondary * 1.6;
     if (score < bestScore) { best = candidate; bestScore = score; }
+  }
+  if (!best && vertical) {
+    const ordered = Array.from(candidates).filter((candidate) => !candidate.closest('.hidden')
+      && candidate.getBoundingClientRect().width > 0 && candidate.getBoundingClientRect().height > 0);
+    const activeIndex = ordered.indexOf(active);
+    const nextIndex = activeIndex + (keyCode === 38 ? -1 : 1);
+    if (activeIndex >= 0 && nextIndex >= 0 && nextIndex < ordered.length) best = ordered[nextIndex];
   }
   if (!best) return false;
   best.focus();
@@ -1309,6 +1538,12 @@ detailPlayButton.addEventListener('click', () => {
     void openSeries(item);
   }
 });
+detailStartOverButton.addEventListener('click', () => {
+  if (detailItem?.kind === 'movie') {
+    const item = detailItem.item;
+    void playVod(item.name ?? 'Movie', item.stream_id, item.container_extension, 'movie', { fromBeginning: true });
+  }
+});
 detailListButton.addEventListener('click', () => {
   if (detailItem?.kind === 'movie') toggleFavorite('movie', detailItem.item.stream_id);
   else if (detailItem?.kind === 'series') toggleFavorite('series', detailItem.item.series_id);
@@ -1321,7 +1556,7 @@ $('show-all-categories').addEventListener('click', () => {
   const view = settingsCategoryType.value as CatalogView;
   const language = activeLanguageFilters[view];
   for (const category of categoriesFor(view)) {
-    if (category.category_id === undefined || (language !== 'all' && languageTags(category.category_name).indexOf(language) < 0)) continue;
+    if (category.category_id === undefined || (language !== 'all' && categoryLanguageTag(category.category_name).toUpperCase() !== language)) continue;
     hiddenCategoryIds[view].delete(String(category.category_id));
   }
   saveHiddenCategories();
@@ -1334,7 +1569,7 @@ $('hide-all-categories').addEventListener('click', () => {
   const view = settingsCategoryType.value as CatalogView;
   const language = activeLanguageFilters[view];
   for (const category of categoriesFor(view)) {
-    if (category.category_id === undefined || (language !== 'all' && languageTags(category.category_name).indexOf(language) < 0)) continue;
+    if (category.category_id === undefined || (language !== 'all' && categoryLanguageTag(category.category_name).toUpperCase() !== language)) continue;
     hiddenCategoryIds[view].add(String(category.category_id));
   }
   saveHiddenCategories();
@@ -1349,10 +1584,28 @@ $('previous-channel').addEventListener('click', () => switchChannel(-1));
 $('next-channel').addEventListener('click', () => switchChannel(1));
 playPauseButton.addEventListener('click', () => {
   if (video.paused) void video.play().catch(() => { playerMessage.textContent = 'Playback could not resume.'; });
-  else video.pause();
+  else { video.pause(); saveWatchProgress(true); }
+});
+seekBar.addEventListener('input', () => {
+  const duration = video.duration;
+  if (!Number.isFinite(duration) || duration <= 0) return;
+  try { video.currentTime = (Number(seekBar.value) / Number(seekBar.max)) * duration; } catch { /* The stream may not expose a seekable range. */ }
+});
+video.addEventListener('loadedmetadata', updateSeekControls);
+video.addEventListener('durationchange', updateSeekControls);
+video.addEventListener('timeupdate', () => {
+  updateSeekControls();
+  saveWatchProgress();
 });
 video.addEventListener('playing', () => { playerMessage.textContent = ''; playPauseButton.textContent = 'Pause'; });
-video.addEventListener('pause', () => { if (selectedChannel) playPauseButton.textContent = 'Play'; });
+video.addEventListener('pause', () => {
+  playPauseButton.textContent = 'Play';
+});
+video.addEventListener('ended', () => {
+  saveWatchProgress(true, true);
+  playerMessage.textContent = 'Playback finished.';
+});
+video.addEventListener('seeked', updateSeekControls);
 video.addEventListener('waiting', () => { playerMessage.textContent = 'Buffering…'; });
 video.addEventListener('error', () => {
   if (!playerLayer.classList.contains('hidden')) playerMessage.textContent = describePlaybackFailure();
@@ -1360,10 +1613,14 @@ video.addEventListener('error', () => {
 
 window.addEventListener('keydown', (event) => {
   const target = event.target as HTMLElement | null;
+  const isSearchVertical = target === searchInput && (event.keyCode === 38 || event.keyCode === 40);
+  const isEmptySearchNavigation = target === searchInput && !searchInput.value.trim();
   const isTextEntry = !!target && ((target.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((target as HTMLInputElement).type))
     || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
   if ([37, 38, 39, 40].includes(event.keyCode) && playerLayer.classList.contains('hidden')) {
-    if (!isTextEntry && moveDirectionalFocus(event.keyCode)) { event.preventDefault(); return; }
+    if ((!isTextEntry || isSearchVertical || isEmptySearchNavigation) && moveDirectionalFocus(event.keyCode)) { event.preventDefault(); return; }
+    if (isSearchVertical) { event.preventDefault(); return; }
+    if (isEmptySearchNavigation) { event.preventDefault(); return; }
     if (!isTextEntry && currentPage === 'settings') { event.preventDefault(); return; }
   }
   const isBack = event.keyCode === 461 || event.keyCode === 10009 || event.key === 'Escape' || (event.key === 'Backspace' && !isTextEntry);
@@ -1373,6 +1630,18 @@ window.addEventListener('keydown', (event) => {
     return;
   }
   if (playerLayer.classList.contains('hidden')) return;
+  if ([37, 38, 39, 40].includes(event.keyCode)) {
+    if ((event.keyCode === 37 || event.keyCode === 39) && target !== seekBar) {
+      event.preventDefault();
+      beginSeekHold(event.keyCode === 37 ? -1 : 1);
+      return;
+    }
+    if (event.keyCode === 38 || event.keyCode === 40) {
+      if (moveDirectionalFocus(event.keyCode)) event.preventDefault();
+      else event.preventDefault();
+      return;
+    }
+  }
   if (event.keyCode === 427 || event.keyCode === 33) {
     event.preventDefault();
     switchChannel(1);
@@ -1382,8 +1651,12 @@ window.addEventListener('keydown', (event) => {
   } else if (event.keyCode === 10252 || event.keyCode === 179 || event.keyCode === 415 || event.keyCode === 19) {
     event.preventDefault();
     if (video.paused) void video.play().catch(() => { playerMessage.textContent = 'Playback could not resume.'; });
-    else video.pause();
+    else { video.pause(); saveWatchProgress(true); }
   }
+});
+
+window.addEventListener('keyup', (event) => {
+  if (event.keyCode === 37 || event.keyCode === 39) stopSeekHold();
 });
 
 $('stay-button').addEventListener('click', closeExitPrompt);
@@ -1394,6 +1667,7 @@ try {
   if (Array.isArray(savedFavorites)) favorites = new Set(savedFavorites.map(String));
   sidebar.classList.toggle('collapsed', localStorage.getItem('nextflix.sidebar-collapsed.v1') === 'true');
 } catch { /* Defaults are used when local storage is unavailable. */ }
+loadWatchHistory();
 
 const savedProvider = readSavedProvider();
 const localProvider = {

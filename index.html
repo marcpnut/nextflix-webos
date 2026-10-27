@@ -35,7 +35,7 @@
             </div>
           </form>
           <div id="message" class="message" role="status" aria-live="polite"></div>
-          <p id="app-version" class="privacy-note">NextFlix 0.3.4 · waiting for app script</p>
+          <p id="app-version" class="privacy-note">NextFlix 0.3.5 · waiting for app script</p>
           <p class="privacy-note">When enabled, login details are saved in this app’s local storage on the TV. They are not encrypted or sent to NextFlix. They are sent to your IPTV provider when connecting and streaming.</p>
         </section>
 
@@ -59,13 +59,14 @@
                 <img id="hero-art" class="hero-art hidden" alt="" />
                 <div class="hero-copy"><div class="eyebrow">FEATURED</div><h1 id="hero-title">Your IPTV library</h1><p id="hero-description">Your movies and series appear here when the catalog has loaded.</p><div class="hero-actions"><button id="hero-play" class="primary">Play</button><button id="hero-browse" class="quiet">Browse movies</button></div></div>
               </div>
+              <section id="continue-row" class="home-row hidden"><h2>Continue Watching</h2><div id="home-continue" class="poster-row"></div></section>
               <section class="home-row"><h2>Recently Added Movies</h2><div id="home-movies" class="poster-row"></div></section>
               <section class="home-row"><h2>Popular Series</h2><div id="home-series" class="poster-row"></div></section>
             </section>
 
             <section id="detail-view" class="detail-view hidden">
               <button id="detail-back" class="quiet detail-back">Back to browse</button>
-              <div class="detail-layout"><img id="detail-poster" class="detail-poster hidden" alt="" /><div><div class="eyebrow" id="detail-kind">TITLE</div><h1 id="detail-title"></h1><div id="detail-meta" class="detail-meta"></div><p id="detail-description" class="detail-description"></p><div class="hero-actions"><button id="detail-play" class="primary">Play</button><button id="detail-list" class="quiet">Add to My List</button></div></div></div>
+              <div class="detail-layout"><img id="detail-poster" class="detail-poster hidden" alt="" /><div><div class="eyebrow" id="detail-kind">TITLE</div><h1 id="detail-title"></h1><div id="detail-meta" class="detail-meta"></div><p id="detail-description" class="detail-description"></p><div class="hero-actions"><button id="detail-play" class="primary">Play</button><button id="detail-start-over" class="quiet hidden">Start from beginning</button><button id="detail-list" class="quiet">Add to My List</button></div></div></div>
             </section>
 
             <section id="settings-view" class="settings-view hidden">
@@ -114,6 +115,7 @@
         <div class="player-top"><div id="playing-title"></div><button id="close-player" class="player-button" aria-label="Close player">Back</button></div>
         <div class="player-bottom">
           <div id="player-message" role="status" aria-live="polite"></div>
+          <div id="seek-row" class="seek-row hidden"><span id="seek-current">0:00</span><input id="seek-bar" type="range" min="0" max="1000" step="1" value="0" aria-label="Seek playback" /><span id="seek-duration">0:00</span></div>
           <div class="player-controls"><button id="play-pause" class="player-button">Pause</button><button id="previous-channel" class="player-button">Previous channel</button><button id="next-channel" class="player-button">Next channel</button></div>
         </div>
       </section>
