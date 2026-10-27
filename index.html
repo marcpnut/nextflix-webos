@@ -19,11 +19,14 @@
           <h1>Watch your channels</h1>
           <p class="muted">Connect to an IPTV provider you are authorized to use.</p>
           <form id="connect-form" autocomplete="off">
-            <label>Server URL<input id="server" type="url" inputmode="url" placeholder="https://provider.example:8080" required /></label>
+            <label>Server URL<input id="server" type="url" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://provider.example:8080" required /></label>
             <div class="credentials">
-              <label>Username<input id="username" type="text" autocomplete="off" required /></label>
-              <label>Password<input id="password" type="password" autocomplete="new-password" required /></label>
+              <label>Username<input id="username" type="text" inputmode="text" autocapitalize="off" spellcheck="false" autocomplete="off" required /></label>
+              <div class="password-control"><label for="password">Password</label>
+                <span class="password-field"><input id="password" type="password" autocomplete="new-password" required /><button id="toggle-password" class="password-toggle" type="button" aria-label="Show password" aria-pressed="false">Show</button></span>
+              </div>
             </div>
+            <label class="remember-label"><input id="remember-provider" type="checkbox" checked /> Remember this login on this TV</label>
             <div class="actions">
               <button id="connect-button" class="primary" type="submit">Connect and load channels</button>
               <label class="format-label">Live format
@@ -32,7 +35,7 @@
             </div>
           </form>
           <div id="message" class="message" role="status" aria-live="polite"></div>
-          <p class="privacy-note">Credentials stay in app memory for this session and are not saved or logged.</p>
+          <p class="privacy-note">When enabled, login details are saved in this app’s local storage on the TV. They are not encrypted or sent to NextFlix. They are sent to your IPTV provider when connecting and streaming.</p>
         </section>
 
         <section id="library" class="library hidden" aria-label="Live channels">

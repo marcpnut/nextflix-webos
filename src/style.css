@@ -29,10 +29,19 @@ form { display: grid; gap: 20px; }
 label { display: grid; gap: 9px; font-size: 17px; color: #d5d5dc; }
 input, select { width: 100%; padding: 0 16px; border: 1px solid #474a56; background: #101116; color: #fff; }
 .credentials { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.password-control { display: grid; gap: 9px; font-size: 17px; color: #d5d5dc; }
+.password-field { display: flex; gap: 10px; }
+.password-field input { min-width: 0; flex: 1; }
+.password-toggle { min-width: 100px; padding: 0 16px; background: #323541; }
+.remember-label { display: flex; align-items: center; gap: 12px; min-height: 42px; }
+.remember-label input { width: 28px; min-height: 28px; height: 28px; accent-color: #f04455; }
 .actions, .library-actions { display: flex; align-items: end; gap: 18px; }
 .primary { border: 0; background: #f04455; font-weight: 700; }
 .format-label { min-width: 235px; }
 .message { min-height: 28px; margin-top: 22px; color: #c7e8c2; font-size: 17px; }
+.message.loading { display: flex; align-items: center; gap: 12px; color: #fff; }
+.message.loading::before { content: ""; width: 20px; height: 20px; flex: 0 0 20px; border: 3px solid #595b66; border-top-color: #f04455; border-radius: 50%; animation: loading-spin .8s linear infinite; }
+@keyframes loading-spin { to { transform: rotate(360deg); } }
 .message.error { color: #ff9099; }
 .privacy-note { font-size: 14px; margin: 6px 0 0; }
 .library { max-width: 1440px; margin: 0 auto; }
@@ -57,4 +66,10 @@ input, select { width: 100%; padding: 0 16px; border: 1px solid #474a56; backgro
   .channel-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   main { padding-left: 5vw; padding-right: 5vw; }
   .topbar { padding: 0 5vw; }
+}
+
+@media (max-width: 900px) {
+  .credentials { grid-template-columns: 1fr; }
+  .actions { flex-direction: column; align-items: stretch; }
+  .format-label { min-width: 0; }
 }

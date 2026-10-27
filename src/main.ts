@@ -25,6 +25,8 @@ const form = $('connect-form') as HTMLFormElement;
 const serverInput = $('server') as HTMLInputElement;
 const usernameInput = $('username') as HTMLInputElement;
 const passwordInput = $('password') as HTMLInputElement;
+const togglePasswordButton = $('toggle-password') as HTMLButtonElement;
+const rememberProviderInput = $('remember-provider') as HTMLInputElement;
 const formatInput = $('format') as HTMLSelectElement;
 const connectButton = $('connect-button') as HTMLButtonElement;
 const message = $('message');
@@ -41,6 +43,8 @@ const playingTitle = $('playing-title');
 const playPauseButton = $('play-pause') as HTMLButtonElement;
 
 const PAGE_SIZE = 72;
+const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
+type SavedProvider = { base: string; username: string; password: string; format: 'ts' | 'm3u8' };
 let credentials: { base: string; username: string; password: string } | null = null;
 let categories: Category[] = [];
 let channels: Channel[] = [];
@@ -58,6 +62,37 @@ function setBusy(busy: boolean): void {
   connectButton.disabled = busy;
   connectButton.textContent = busy ? 'Connecting…' : 'Connect and load channels';
   form.setAttribute('aria-busy', String(busy));
+  message.classList.toggle('loading', busy);
+}
+
+function readSavedProvider(): SavedProvider | null {
+  try {
+    const raw = localStorage.getItem(REMEMBERED_PROVIDER_KEY);
+    if (!raw) return null;
+    const saved = JSON.parse(raw) as Partial<SavedProvider>;
+    if (typeof saved.base !== 'string' || typeof saved.username !== 'string' || typeof saved.password !== 'string') return null;
+    return {
+      base: saved.base,
+      username: saved.username,
+      password: saved.password,
+      format: saved.format === 'm3u8' ? 'm3u8' : 'ts'
+    };
+  } catch {
+    return null;
+  }
+}
+
+function saveProvider(saved: SavedProvider): boolean {
+  try {
+    localStorage.setItem(REMEMBERED_PROVIDER_KEY, JSON.stringify(saved));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function forgetProvider(): void {
+  try { localStorage.removeItem(REMEMBERED_PROVIDER_KEY); } catch { /* Storage may be unavailable on some TV builds. */ }
 }
 
 function normalizedBase(value: string): string {
@@ -71,7 +106,7 @@ async function api<T>(action?: string, extra: Record<string, string> = {}): Prom
   requestController?.abort();
   const controller = new AbortController();
   requestController = controller;
-  const timeout = window.setTimeout(() => controller.abort(), 18000);
+  const timeout = window.setTimeout(() => controller.abort(), 15000);
   const query = new URLSearchParams({ username: credentials.username, password: credentials.password, ...extra });
   if (action) query.set('action', action);
   try {
@@ -104,7 +139,7 @@ function assertAuthenticated(data: XtreamAuth): void {
 
 async function loadProvider(): Promise<void> {
   setBusy(true);
-  setMessage('Checking provider and loading channels…');
+  setMessage('Checking provider URL…');
   try {
     const base = normalizedBase(serverInput.value);
     const username = usernameInput.value.trim();
@@ -112,10 +147,21 @@ async function loadProvider(): Promise<void> {
     if (!username || !password) throw new Error('Enter both username and password.');
     credentials = { base, username, password };
 
+    setMessage('Checking your provider login…');
     const auth = await api<XtreamAuth>();
     assertAuthenticated(auth);
-    const categoryResponse = await api<Category[]>('get_live_categories').catch(() => [] as Category[]);
+    let categoryWarning = '';
+    setMessage('Login accepted. Loading categories…');
+    const categoryResponse = await api<Category[]>('get_live_categories').catch(() => {
+      categoryWarning = 'Categories are unavailable; showing channels without category names. ';
+      return [] as Category[];
+    });
     categories = Array.isArray(categoryResponse) ? categoryResponse : [];
+    if (rememberProviderInput.checked && !saveProvider({ base, username, password, format: formatInput.value === 'm3u8' ? 'm3u8' : 'ts' })) {
+      categoryWarning += 'TV storage could not save the login. ';
+    }
+
+    setMessage('Login accepted. Loading live channels…');
     const channelResponse = await api<Channel[]>('get_live_streams');
     if (!Array.isArray(channelResponse)) throw new Error('Provider returned an invalid live channel list.');
     channels = channelResponse.filter((channel) => channel && channel.stream_id !== undefined && channel.name);
@@ -130,7 +176,7 @@ async function loadProvider(): Promise<void> {
     setupSection.classList.add('hidden');
     librarySection.classList.remove('hidden');
     passwordInput.value = '';
-    setMessage('');
+    setMessage(categoryWarning);
     renderChannels();
     channelList.querySelector<HTMLButtonElement>('button')?.focus();
   } catch (error) {
@@ -238,16 +284,28 @@ function disconnect(): void {
   librarySection.classList.add('hidden');
   setupSection.classList.remove('hidden');
   stateLabel.textContent = 'Not connected';
-  serverInput.value = '';
-  usernameInput.value = '';
-  passwordInput.value = '';
-  setMessage('Disconnected. Credentials were cleared from app memory.');
+  const saved = rememberProviderInput.checked ? readSavedProvider() : null;
+  serverInput.value = saved?.base ?? '';
+  usernameInput.value = saved?.username ?? '';
+  passwordInput.value = saved?.password ?? '';
+  if (saved) formatInput.value = saved.format;
+  setMessage(saved ? 'Disconnected. Your saved login remains on this TV.' : 'Disconnected. Session credentials were cleared.');
   serverInput.focus();
 }
 
 form.addEventListener('submit', (event) => {
   event.preventDefault();
   void loadProvider();
+});
+togglePasswordButton.addEventListener('click', () => {
+  const show = passwordInput.type === 'password';
+  passwordInput.type = show ? 'text' : 'password';
+  togglePasswordButton.textContent = show ? 'Hide' : 'Show';
+  togglePasswordButton.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  togglePasswordButton.setAttribute('aria-pressed', String(show));
+});
+rememberProviderInput.addEventListener('change', () => {
+  if (!rememberProviderInput.checked) forgetProvider();
 });
 categorySelect.addEventListener('change', () => renderChannels());
 moreButton.addEventListener('click', () => renderChannels(true));
@@ -287,4 +345,15 @@ window.addEventListener('keydown', (event) => {
     else video.pause();
   }
 });
+
+const savedProvider = readSavedProvider();
+if (savedProvider) {
+  rememberProviderInput.checked = true;
+  serverInput.value = savedProvider.base;
+  usernameInput.value = savedProvider.username;
+  passwordInput.value = savedProvider.password;
+  formatInput.value = savedProvider.format;
+  setMessage('Reconnecting with the login saved on this TV…');
+  window.setTimeout(() => { void loadProvider(); }, 300);
+}
 
