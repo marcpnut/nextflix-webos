@@ -35,7 +35,7 @@
             </div>
           </form>
           <div id="message" class="message" role="status" aria-live="polite"></div>
-          <p id="app-version" class="privacy-note">NextFlix 0.3.2 · waiting for app script</p>
+          <p id="app-version" class="privacy-note">NextFlix 0.3.3 · waiting for app script</p>
           <p class="privacy-note">When enabled, login details are saved in this app’s local storage on the TV. They are not encrypted or sent to NextFlix. They are sent to your IPTV provider when connecting and streaming.</p>
         </section>
 
@@ -43,16 +43,17 @@
           <aside id="sidebar" class="sidebar" aria-label="Main navigation">
             <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Collapse navigation">☰</button>
             <nav id="main-navigation">
-              <button data-page="home" data-icon="⌂" class="nav-button active">Home</button>
-              <button data-page="search" data-icon="⌕" class="nav-button">Search</button>
-              <button data-page="movies" data-icon="▣" class="nav-button">Movies</button>
-              <button data-page="series" data-icon="▤" class="nav-button">Series</button>
-              <button data-page="live" data-icon="◉" class="nav-button">Live TV</button>
-              <button data-page="my-list" data-icon="＋" class="nav-button">My List</button>
-              <button data-page="settings" data-icon="⚙" class="nav-button">Settings</button>
+              <button data-page="home" aria-label="Home" class="nav-button active"><img class="nav-icon" src="icons/home.png" alt="" /><span>Home</span></button>
+              <button data-page="search" aria-label="Search" class="nav-button"><img class="nav-icon" src="icons/search.png" alt="" /><span>Search</span></button>
+              <button data-page="movies" aria-label="Movies" class="nav-button"><img class="nav-icon" src="icons/movies.png" alt="" /><span>Movies</span></button>
+              <button data-page="series" aria-label="Series" class="nav-button"><img class="nav-icon" src="icons/series.png" alt="" /><span>Series</span></button>
+              <button data-page="live" aria-label="Live TV" class="nav-button"><img class="nav-icon" src="icons/live.png" alt="" /><span>Live TV</span></button>
+              <button data-page="my-list" aria-label="My List" class="nav-button"><img class="nav-icon" src="icons/my-list.png" alt="" /><span>My List</span></button>
+              <button data-page="settings" aria-label="Settings" class="nav-button"><img class="nav-icon" src="icons/settings.png" alt="" /><span>Settings</span></button>
             </nav>
           </aside>
           <div class="app-content">
+            <div id="language-filter" class="language-filter hidden" role="group" aria-label="Filter categories by language"></div>
             <section id="home-view" class="home-view">
               <div class="hero" id="home-hero">
                 <img id="hero-art" class="hero-art hidden" alt="" />

@@ -54,12 +54,18 @@ input, select { width: 100%; padding: 0 16px; border: 1px solid #474a56; backgro
 .sidebar { width: 248px; flex: 0 0 248px; padding: 24px 16px; background: #1c1e27; transition: width .16s ease, flex-basis .16s ease; }
 .sidebar-toggle { width: 100%; margin-bottom: 24px; text-align: left; background: transparent; }
 .sidebar nav { display: grid; gap: 8px; }
-.nav-button { width: 100%; min-height: 58px; text-align: left; border-color: transparent; background: transparent; }
+.nav-button { display: flex; align-items: center; gap: 18px; width: 100%; min-height: 58px; text-align: left; border-color: transparent; background: transparent; }
+.nav-icon { display: block; flex: 0 0 32px; width: 32px; height: 32px; object-fit: contain; }
+.nav-button > span { min-width: 0; }
 .nav-button.active { border-color: #f04455; background: #323541; }
 .sidebar.collapsed { width: 88px; flex-basis: 88px; padding-left: 12px; padding-right: 12px; }
-.sidebar.collapsed .nav-button { overflow: hidden; padding: 0; text-align: center; font-size: 0; }
-.sidebar.collapsed .nav-button::before { content: attr(data-icon); font-size: 26px; }
+.sidebar.collapsed .nav-button { justify-content: center; gap: 0; overflow: hidden; padding: 0; text-align: center; }
+.sidebar.collapsed .nav-button > span { display: none; }
 .app-content { flex: 1; min-width: 0; height: 100%; overflow-y: auto; padding: 38px 48px 64px; }
+.language-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 22px; }
+.language-choice { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 52px; padding: 0 16px; border-color: #4a4c58; background: #292c36; font-size: 17px; }
+.language-choice.selected { border-color: #f04455; background: #38313a; }
+.language-flag { font-size: 25px; line-height: 1; }
 .library { max-width: 1440px; margin: 0 auto; }
 .library-heading { display: flex; justify-content: space-between; align-items: end; margin-bottom: 26px; }
 .library-heading h1 { margin-bottom: 0; }
@@ -100,6 +106,7 @@ input, select { width: 100%; padding: 0 16px; border: 1px solid #474a56; backgro
 .settings-actions { display: flex; gap: 12px; margin-bottom: 18px; }
 .category-visibility-list { max-width: 900px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; }
 .category-visibility-item { display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 8px 14px; border-radius: 8px; background: #1c1e27; }
+.category-visibility-item:focus-within { outline: 3px solid #bd3544; outline-offset: 2px; background: #292c36; }
 .category-visibility-item input { width: 26px; height: 26px; accent-color: #f04455; }
 .player { position: fixed; inset: 0; z-index: 10; background: #000; }
 .player video { width: 100%; height: 100%; object-fit: contain; background: #000; }

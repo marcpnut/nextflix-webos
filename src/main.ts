@@ -54,6 +54,7 @@ const heroPlayButton = $('hero-play') as HTMLButtonElement;
 const heroBrowseButton = $('hero-browse') as HTMLButtonElement;
 const homeMovies = $('home-movies');
 const homeSeries = $('home-series');
+const languageFilter = $('language-filter');
 const detailPoster = $('detail-poster') as HTMLImageElement;
 const detailKind = $('detail-kind');
 const detailTitle = $('detail-title');
@@ -82,7 +83,7 @@ const playPauseButton = $('play-pause') as HTMLButtonElement;
 const PAGE_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.3.2';
+const APP_VERSION = '0.3.3';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -106,6 +107,8 @@ let detailItem: { kind: 'movie'; item: Movie } | { kind: 'series'; item: Series 
 let featuredItem: { kind: 'movie'; item: Movie } | { kind: 'series'; item: Series } | null = null;
 let hiddenCategoryIds: Record<CatalogView, Set<string>> = { live: new Set(), movies: new Set(), series: new Set() };
 let hiddenCategoriesKey = 'nextflix.hidden-categories.v1';
+let languageFilterKey = 'nextflix.language-filter.v1';
+let activeLanguageFilters: Record<CatalogView, string> = { live: 'all', movies: 'all', series: 'all' };
 let favorites = new Set<string>();
 const FAVORITES_KEY = 'nextflix.my-list.v1';
 let searchTimer = 0;
@@ -355,14 +358,111 @@ function clearChildren(element: Element): void {
   }
 }
 
-function categoriesForView(): Category[] {
-  if (catalogView === 'movies') return movieCategories;
-  if (catalogView === 'series') return seriesCategories;
+function categoriesFor(view: CatalogView): Category[] {
+  if (view === 'movies') return movieCategories;
+  if (view === 'series') return seriesCategories;
   return categories;
 }
 
-function isCategoryVisible(view: CatalogView, categoryId: string | number | undefined): boolean {
+function categoriesForView(): Category[] {
+  return categoriesFor(catalogView);
+}
+
+const LANGUAGE_LABELS: Record<string, string> = {
+  AL: 'Albanian', AR: 'Arabic', BG: 'Bulgarian', BR: 'Brazilian Portuguese', BA: 'Bosnian', CN: 'Chinese',
+  HR: 'Croatian', CZ: 'Czech', DK: 'Danish', NL: 'Dutch', EN: 'English', UK: 'English', EE: 'Estonian',
+  FA: 'Persian', FI: 'Finnish', FR: 'French', DE: 'German', GR: 'Greek', EL: 'Greek', HE: 'Hebrew',
+  HI: 'Hindi', HU: 'Hungarian', ID: 'Indonesian', IT: 'Italian', JP: 'Japanese', JA: 'Japanese',
+  KR: 'Korean', KO: 'Korean', LV: 'Latvian', LT: 'Lithuanian', MK: 'Macedonian', MS: 'Malay',
+  NO: 'Norwegian', PL: 'Polish', PT: 'Portuguese', RO: 'Romanian', RU: 'Russian', RS: 'Serbian',
+  SK: 'Slovak', SI: 'Slovenian', ES: 'Spanish', SE: 'Swedish', TH: 'Thai', TR: 'Turkish',
+  UA: 'Ukrainian', VI: 'Vietnamese', MULTI: 'Multiple languages'
+};
+
+function languageTags(categoryName: string | undefined): string[] {
+  if (!categoryName || categoryName.indexOf('|') < 0) return [];
+  const prefix = categoryName.split('|')[0].trim().toUpperCase();
+  const leadingTags = prefix.match(/^(?:MULTI|[A-Z]{2})(?=$|[\s/,;+&-])(?:\s*[/,+&]\s*(?:MULTI|[A-Z]{2})(?=$|[\s/,;+&-]))*/);
+  if (!leadingTags) return [];
+  const ignored = new Set(['HD', 'SD', 'TV', 'IP', '4K', 'VOD']);
+  return (leadingTags[0].match(/MULTI|[A-Z]{2}/g) ?? []).filter((code) => !ignored.has(code));
+}
+
+function languagesForView(view: CatalogView): string[] {
+  const found = new Set<string>();
+  for (const category of categoriesFor(view)) {
+    for (const code of languageTags(category.category_name)) found.add(code);
+  }
+  return Array.from(found).sort((left, right) => left === 'MULTI' ? 1 : right === 'MULTI' ? -1 : left.localeCompare(right));
+}
+
+function languageFlag(code: string): string {
+  if (code === 'MULTI') return '🌐';
+  const region = ({ EN: 'GB', UK: 'GB', EL: 'GR', JA: 'JP', KO: 'KR', CN: 'CN' } as Record<string, string>)[code] ?? code;
+  if (!/^[A-Z]{2}$/.test(region)) return '🌐';
+  return String.fromCodePoint(0x1f1e6 + region.charCodeAt(0) - 65, 0x1f1e6 + region.charCodeAt(1) - 65);
+}
+
+function selectedLanguageView(): CatalogView {
+  return currentPage === 'settings' ? settingsCategoryType.value as CatalogView : catalogView;
+}
+
+function renderLanguageFilter(): void {
+  const visible = currentPage === 'settings' || currentPage === 'movies' || currentPage === 'series' || currentPage === 'live';
+  languageFilter.classList.toggle('hidden', !visible);
+  clearChildren(languageFilter);
+  if (!visible) return;
+
+  const view = selectedLanguageView();
+  const available = languagesForView(view);
+  if (activeLanguageFilters[view] !== 'all' && available.indexOf(activeLanguageFilters[view]) < 0) {
+    activeLanguageFilters[view] = 'all';
+  }
+  const options = ['all', ...available];
+  for (const code of options) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `language-choice${activeLanguageFilters[view] === code ? ' selected' : ''}`;
+    button.setAttribute('aria-pressed', String(activeLanguageFilters[view] === code));
+    const name = code === 'all' ? 'All languages' : `${LANGUAGE_LABELS[code] ?? code} (${code})`;
+    button.setAttribute('aria-label', name);
+    button.title = name;
+    if (code === 'all') {
+      button.textContent = 'All';
+    } else {
+      const flag = document.createElement('span');
+      flag.className = 'language-flag';
+      flag.textContent = languageFlag(code);
+      const label = document.createElement('span');
+      label.textContent = code;
+      button.appendChild(flag);
+      button.appendChild(label);
+    }
+    button.addEventListener('click', () => {
+      activeLanguageFilters[view] = code;
+      try { localStorage.setItem(languageFilterKey, JSON.stringify(activeLanguageFilters)); } catch { /* Session-only filter selection. */ }
+      renderLanguageFilter();
+      if (currentPage === 'settings') {
+        renderCategorySettings();
+      } else {
+        updateCatalogHeading();
+        renderChannels();
+      }
+    });
+    languageFilter.appendChild(button);
+  }
+}
+
+function isCategoryEnabled(view: CatalogView, categoryId: string | number | undefined): boolean {
   return categoryId === undefined || !hiddenCategoryIds[view].has(String(categoryId));
+}
+
+function isCategoryVisible(view: CatalogView, categoryId: string | number | undefined): boolean {
+  if (!isCategoryEnabled(view, categoryId)) return false;
+  const language = activeLanguageFilters[view];
+  if (language === 'all') return true;
+  const category = categoriesFor(view).find((item) => String(item.category_id ?? '') === String(categoryId ?? ''));
+  return !!category && languageTags(category.category_name).indexOf(language) >= 0;
 }
 
 function saveHiddenCategories(): void {
@@ -377,6 +477,7 @@ function saveHiddenCategories(): void {
 
 function loadHiddenCategories(key: string): void {
   hiddenCategoriesKey = `nextflix.hidden-categories.${m3uCatalogKey(key)}`;
+  languageFilterKey = `nextflix.language-filter.${m3uCatalogKey(key)}`;
   try {
     const saved = JSON.parse(localStorage.getItem(hiddenCategoriesKey) ?? '{}') as Partial<Record<CatalogView, unknown>>;
     for (const view of ['live', 'movies', 'series'] as CatalogView[]) {
@@ -384,6 +485,16 @@ function loadHiddenCategories(key: string): void {
     }
   } catch {
     hiddenCategoryIds = { live: new Set(), movies: new Set(), series: new Set() };
+  }
+  try {
+    const savedLanguageFilters = JSON.parse(localStorage.getItem(languageFilterKey) ?? '{}') as Partial<Record<CatalogView, unknown>>;
+    activeLanguageFilters = {
+      live: typeof savedLanguageFilters.live === 'string' ? savedLanguageFilters.live : 'all',
+      movies: typeof savedLanguageFilters.movies === 'string' ? savedLanguageFilters.movies : 'all',
+      series: typeof savedLanguageFilters.series === 'string' ? savedLanguageFilters.series : 'all'
+    };
+  } catch {
+    activeLanguageFilters = { live: 'all', movies: 'all', series: 'all' };
   }
 }
 
@@ -445,7 +556,7 @@ function renderPosterRow(container: HTMLElement, kind: 'movie' | 'series', items
     const item = raw as Movie & Series;
     const title = item.name ?? 'Untitled';
     const posterUrl = kind === 'movie' ? (item as Movie).stream_icon : (item as Series).cover;
-    if (!isCategoryVisible(kind === 'movie' ? 'movies' : 'series', item.category_id)) continue;
+    if (!isCategoryEnabled(kind === 'movie' ? 'movies' : 'series', item.category_id)) continue;
     const button = document.createElement('button');
     button.className = 'poster-tile';
     button.type = 'button';
@@ -467,8 +578,8 @@ function renderPosterRow(container: HTMLElement, kind: 'movie' | 'series', items
 }
 
 function renderHome(): void {
-  const firstMovie = movies.find((item) => isCategoryVisible('movies', item.category_id));
-  const firstSeries = series.find((item) => isCategoryVisible('series', item.category_id));
+  const firstMovie = movies.find((item) => isCategoryEnabled('movies', item.category_id));
+  const firstSeries = series.find((item) => isCategoryEnabled('series', item.category_id));
   featuredItem = firstMovie ? { kind: 'movie', item: firstMovie } : firstSeries ? { kind: 'series', item: firstSeries } : null;
   if (featuredItem) {
     const item = featuredItem.item;
@@ -533,8 +644,10 @@ function renderMyList(): void {
 function renderCategorySettings(): void {
   clearChildren(categoryVisibilityList);
   const view = settingsCategoryType.value as CatalogView;
-  for (const category of view === 'live' ? categories : view === 'movies' ? movieCategories : seriesCategories) {
+  const language = activeLanguageFilters[view];
+  for (const category of categoriesFor(view)) {
     if (category.category_id === undefined || !category.category_name) continue;
+    if (language !== 'all' && languageTags(category.category_name).indexOf(language) < 0) continue;
     const label = document.createElement('label');
     label.className = 'category-visibility-item';
     const checkbox = document.createElement('input');
@@ -575,6 +688,7 @@ function showPage(page: AppPage): void {
     if (!['live', 'movies', 'series'].includes(catalogView)) catalogView = 'movies';
     catalogTypeSelect.value = catalogView;
   }
+  renderLanguageFilter();
   if (showCatalogPage && !leavingDetail) {
     updateCatalogHeading();
     renderChannels();
@@ -592,6 +706,7 @@ function showPage(page: AppPage): void {
 }
 
 function updateCatalogHeading(): void {
+  renderLanguageFilter();
   catalogTitle.textContent = activeSeries
     ? `${activeSeries.name ?? 'Series'} · Episodes`
     : currentPage === 'search' ? 'Search'
@@ -689,7 +804,10 @@ async function loadMoviesAndSeries(key: string): Promise<void> {
     renderChannels();
   }
   if (currentPage === 'home') renderHome();
-  if (currentPage === 'settings') renderCategorySettings();
+  if (currentPage === 'settings') {
+    renderLanguageFilter();
+    renderCategorySettings();
+  }
   if (currentPage === 'my-list') renderMyList();
   libraryMessage.textContent = warnings.length
     ? `Live TV is ready. ${warnings.join('; ')}. Your provider may not support these catalogs.`
@@ -1075,7 +1193,8 @@ function exitApplication(): void {
 
 function moveDirectionalFocus(keyCode: number): boolean {
   const active = document.activeElement as HTMLElement | null;
-  if (!active || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT') return false;
+  if (!active || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || active.isContentEditable) return false;
+  if (active.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((active as HTMLInputElement).type)) return false;
   const current = active.getBoundingClientRect();
   const x = current.left + current.width / 2;
   const y = current.top + current.height / 2;
@@ -1192,10 +1311,17 @@ detailListButton.addEventListener('click', () => {
   if (detailItem?.kind === 'movie') toggleFavorite('movie', detailItem.item.stream_id);
   else if (detailItem?.kind === 'series') toggleFavorite('series', detailItem.item.series_id);
 });
-settingsCategoryType.addEventListener('change', renderCategorySettings);
+settingsCategoryType.addEventListener('change', () => {
+  renderLanguageFilter();
+  renderCategorySettings();
+});
 $('show-all-categories').addEventListener('click', () => {
   const view = settingsCategoryType.value as CatalogView;
-  hiddenCategoryIds[view].clear();
+  const language = activeLanguageFilters[view];
+  for (const category of categoriesFor(view)) {
+    if (category.category_id === undefined || (language !== 'all' && languageTags(category.category_name).indexOf(language) < 0)) continue;
+    hiddenCategoryIds[view].delete(String(category.category_id));
+  }
   saveHiddenCategories();
   renderCategorySettings();
   updateCatalogHeading();
@@ -1204,8 +1330,11 @@ $('show-all-categories').addEventListener('click', () => {
 });
 $('hide-all-categories').addEventListener('click', () => {
   const view = settingsCategoryType.value as CatalogView;
-  hiddenCategoryIds[view] = new Set((view === 'live' ? categories : view === 'movies' ? movieCategories : seriesCategories)
-    .filter((item) => item.category_id !== undefined).map((item) => String(item.category_id)));
+  const language = activeLanguageFilters[view];
+  for (const category of categoriesFor(view)) {
+    if (category.category_id === undefined || (language !== 'all' && languageTags(category.category_name).indexOf(language) < 0)) continue;
+    hiddenCategoryIds[view].add(String(category.category_id));
+  }
   saveHiddenCategories();
   renderCategorySettings();
   updateCatalogHeading();
@@ -1229,11 +1358,13 @@ video.addEventListener('error', () => {
 
 window.addEventListener('keydown', (event) => {
   const target = event.target as HTMLElement | null;
-  const isEditing = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
+  const isTextEntry = !!target && ((target.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((target as HTMLInputElement).type))
+    || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
   if ([37, 38, 39, 40].includes(event.keyCode) && playerLayer.classList.contains('hidden')) {
-    if (!isEditing && moveDirectionalFocus(event.keyCode)) { event.preventDefault(); return; }
+    if (!isTextEntry && moveDirectionalFocus(event.keyCode)) { event.preventDefault(); return; }
+    if (!isTextEntry && currentPage === 'settings') { event.preventDefault(); return; }
   }
-  const isBack = event.keyCode === 461 || event.keyCode === 10009 || event.key === 'Escape' || (event.key === 'Backspace' && !isEditing);
+  const isBack = event.keyCode === 461 || event.keyCode === 10009 || event.key === 'Escape' || (event.key === 'Backspace' && !isTextEntry);
   if (isBack) {
     event.preventDefault();
     handleBackPress();
