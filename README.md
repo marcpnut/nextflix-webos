@@ -32,6 +32,9 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 - Filter Live TV, Movies, Series, and Settings using the literal text before `|` or between the first two pipes (for example, `NL/PL | ...` or `|NL| ...`). Options are derived from category names; the filter is hidden on Home.
 - Seek VOD with the progress slider or remote Left/Right; short presses skip 10 seconds and holding accelerates seeking.
 - Save local VOD resume progress and show a Continue Watching row on Home. Movie details offer Resume and Start from beginning.
+- Use a full-screen player overlay with a top back arrow and white icon controls; VOD shows 10-second skip controls and Live TV shows previous/next channel controls.
+- Navigate closed dropdowns with the D-pad; press OK to open one, use Up/Down within its options, and Left/Right to move focus away.
+- Keep extra spacing between catalogue filters and search; long movie and series titles on Home truncate with an ellipsis.
 - Use locally stored playback progress only; no stream URLs or provider credentials are stored in watch history.
 - Navigate with directional remote keys and get focus return when closing title details.
 - Require three Back presses on Home before showing the exit confirmation; Back closes the player or returns to Home from a subpage.
@@ -85,5 +88,5 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - [x] Publish the versioned IPK release asset.
 - [x] User verified provider login, live-channel loading, and playback on the target TV.
 - [x] User verified movie and series playback on the target TV.
-- [ ] Test Phase 3 sidebar, detail/search focus, dropdown styling, poster sizing, My List, category and language filters, and three-press exit on the TV.
-- [ ] Test Phase 4 VOD seeking, resume position, and progress cleanup on completion on the TV.
+- [ ] Test Phase 3 sidebar, detail/search/dropdown focus, filter spacing, poster sizing, My List, category and language filters, and three-press exit on the TV.
+- [ ] Test Phase 4 player icon controls, VOD seeking, resume position, and progress cleanup on completion on the TV.

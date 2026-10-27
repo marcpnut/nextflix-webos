@@ -82,6 +82,10 @@ const video = $('video') as HTMLVideoElement;
 const playerMessage = $('player-message');
 const playingTitle = $('playing-title');
 const playPauseButton = $('play-pause') as HTMLButtonElement;
+const seekBackButton = $('seek-back') as HTMLButtonElement;
+const seekForwardButton = $('seek-forward') as HTMLButtonElement;
+const previousChannelButton = $('previous-channel') as HTMLButtonElement;
+const nextChannelButton = $('next-channel') as HTMLButtonElement;
 const seekRow = $('seek-row');
 const seekBar = $('seek-bar') as HTMLInputElement;
 const seekCurrent = $('seek-current');
@@ -90,7 +94,7 @@ const seekDuration = $('seek-duration');
 const PAGE_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.3.5';
+const APP_VERSION = '0.3.6';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -153,6 +157,7 @@ let seekHoldTimer = 0;
 let seekHoldDirection: -1 | 1 | 0 = 0;
 let seekHoldStartedAt = 0;
 let seekHoldLastSignal = 0;
+let openDropdown: HTMLSelectElement | null = null;
 
 function setMessage(text: string, isError = false): void {
   message.textContent = text;
@@ -526,6 +531,22 @@ function playbackTime(seconds: number): string {
   const minutes = Math.floor((whole % 3600) / 60);
   const secs = whole % 60;
   return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}` : `${minutes}:${String(secs).padStart(2, '0')}`;
+}
+
+function updatePlayPauseControl(isPlaying: boolean): void {
+  playPauseButton.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
+  playPauseButton.title = isPlaying ? 'Pause' : 'Play';
+  playPauseButton.innerHTML = isPlaying
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 12 7-12 7z" /></svg>';
+}
+
+function updatePlaybackControls(): void {
+  const live = selectedChannel !== null;
+  previousChannelButton.classList.toggle('hidden', !live);
+  nextChannelButton.classList.toggle('hidden', !live);
+  seekBackButton.classList.toggle('hidden', live);
+  seekForwardButton.classList.toggle('hidden', live);
 }
 
 function watchEntryForMovie(id: number | string): WatchProgress | undefined {
@@ -1245,11 +1266,12 @@ async function startPlayback(
   playerMessage.textContent = 'Connecting to stream…';
   playerLayer.classList.remove('hidden');
   seekRow.classList.add('hidden');
-  playPauseButton.textContent = 'Pause';
+  updatePlayPauseControl(false);
   video.pause();
   video.removeAttribute('src');
   video.load();
   selectedChannel = channel;
+  updatePlaybackControls();
   currentVodEntry = resume?.entry ?? null;
   lastProgressWrite = 0;
   video.src = url;
@@ -1413,7 +1435,7 @@ function exitApplication(): void {
 
 function moveDirectionalFocus(keyCode: number): boolean {
   const active = document.activeElement as HTMLElement | null;
-  if (!active || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || active.isContentEditable) return false;
+  if (!active || active.tagName === 'TEXTAREA' || (active === openDropdown) || active.isContentEditable) return false;
   const vertical = keyCode === 38 || keyCode === 40;
   const emptySearch = active === searchInput && !searchInput.value.trim();
   if (active.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'range'].includes((active as HTMLInputElement).type)
@@ -1427,7 +1449,7 @@ function moveDirectionalFocus(keyCode: number): boolean {
     : exitConfirm.classList.contains('hidden') ? document : exitConfirm;
   const candidates = scope.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled])');
   for (const candidate of Array.from(candidates)) {
-    if (candidate === active || candidate.closest('.hidden')) continue;
+    if (candidate === active || candidate === openDropdown || candidate.closest('.hidden')) continue;
     const rect = candidate.getBoundingClientRect();
     if (!rect.width || !rect.height) continue;
     const dx = rect.left + rect.width / 2 - x;
@@ -1580,8 +1602,10 @@ $('hide-all-categories').addEventListener('click', () => {
 });
 $('disconnect-button').addEventListener('click', disconnect);
 $('close-player').addEventListener('click', closePlayer);
-$('previous-channel').addEventListener('click', () => switchChannel(-1));
-$('next-channel').addEventListener('click', () => switchChannel(1));
+previousChannelButton.addEventListener('click', () => switchChannel(-1));
+nextChannelButton.addEventListener('click', () => switchChannel(1));
+seekBackButton.addEventListener('click', () => seekBy(-10));
+seekForwardButton.addEventListener('click', () => seekBy(10));
 playPauseButton.addEventListener('click', () => {
   if (video.paused) void video.play().catch(() => { playerMessage.textContent = 'Playback could not resume.'; });
   else { video.pause(); saveWatchProgress(true); }
@@ -1597,10 +1621,8 @@ video.addEventListener('timeupdate', () => {
   updateSeekControls();
   saveWatchProgress();
 });
-video.addEventListener('playing', () => { playerMessage.textContent = ''; playPauseButton.textContent = 'Pause'; });
-video.addEventListener('pause', () => {
-  playPauseButton.textContent = 'Play';
-});
+video.addEventListener('playing', () => { playerMessage.textContent = ''; updatePlayPauseControl(true); });
+video.addEventListener('pause', () => updatePlayPauseControl(false));
 video.addEventListener('ended', () => {
   saveWatchProgress(true, true);
   playerMessage.textContent = 'Playback finished.';
@@ -1613,11 +1635,25 @@ video.addEventListener('error', () => {
 
 window.addEventListener('keydown', (event) => {
   const target = event.target as HTMLElement | null;
+  const isArrow = [37, 38, 39, 40].includes(event.keyCode);
+  if (target instanceof HTMLSelectElement) {
+    if (event.keyCode === 13 || event.keyCode === 23 || event.key === ' ' || event.key === 'Enter') {
+      openDropdown = openDropdown === target ? null : target;
+      return;
+    }
+    if (isArrow) {
+      if (openDropdown === target && (event.keyCode === 38 || event.keyCode === 40)) return;
+      if (openDropdown === target) openDropdown = null;
+      event.preventDefault();
+      moveDirectionalFocus(event.keyCode);
+      return;
+    }
+  }
   const isSearchVertical = target === searchInput && (event.keyCode === 38 || event.keyCode === 40);
   const isEmptySearchNavigation = target === searchInput && !searchInput.value.trim();
   const isTextEntry = !!target && ((target.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((target as HTMLInputElement).type))
     || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
-  if ([37, 38, 39, 40].includes(event.keyCode) && playerLayer.classList.contains('hidden')) {
+  if (isArrow && playerLayer.classList.contains('hidden')) {
     if ((!isTextEntry || isSearchVertical || isEmptySearchNavigation) && moveDirectionalFocus(event.keyCode)) { event.preventDefault(); return; }
     if (isSearchVertical) { event.preventDefault(); return; }
     if (isEmptySearchNavigation) { event.preventDefault(); return; }
@@ -1653,6 +1689,11 @@ window.addEventListener('keydown', (event) => {
     if (video.paused) void video.play().catch(() => { playerMessage.textContent = 'Playback could not resume.'; });
     else { video.pause(); saveWatchProgress(true); }
   }
+});
+
+document.querySelectorAll<HTMLSelectElement>('select').forEach((select) => {
+  select.addEventListener('click', (event) => { if (event.detail > 0) openDropdown = select; });
+  select.addEventListener('blur', () => { if (openDropdown === select) openDropdown = null; });
 });
 
 window.addEventListener('keyup', (event) => {
