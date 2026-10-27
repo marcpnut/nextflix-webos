@@ -39,7 +39,7 @@ const playPauseButton = $('play-pause') as HTMLButtonElement;
 const PAGE_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.1.8';
+const APP_VERSION = '0.1.9';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat };
@@ -205,8 +205,7 @@ function chooseLiveFormat(auth: XtreamAuth): string {
   return allowedLiveFormats[0] ?? 'ts';
 }
 
-// Element.replaceChildren is missing in some webOS browser runtimes. Keep
-// playlist rendering compatible with the older DOM APIs available there.
+// Keep playlist rendering compatible with older webOS DOM implementations.
 function clearChildren(element: Element): void {
   while (element.firstChild) {
     element.removeChild(element.firstChild);
@@ -361,18 +360,19 @@ function renderChannels(append = false): void {
     const name = document.createElement('span');
     name.className = 'channel-name';
     name.textContent = channel.name ?? 'Unknown channel';
-    button.append(number, name);
+    button.appendChild(number);
+    button.appendChild(name);
     button.addEventListener('click', () => playChannel(channel));
-    fragment.append(button);
+    fragment.appendChild(button);
   }
-  channelList.append(fragment);
+  channelList.appendChild(fragment);
   renderedCount += next.length;
   moreButton.classList.toggle('hidden', renderedCount >= visibleChannels.length);
   if (!visibleChannels.length) {
     const empty = document.createElement('p');
     empty.className = 'muted';
     empty.textContent = 'No channels in this category.';
-    channelList.append(empty);
+    channelList.appendChild(empty);
   }
 }
 
