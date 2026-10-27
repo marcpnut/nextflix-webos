@@ -29,6 +29,7 @@ const togglePasswordButton = $('toggle-password') as HTMLButtonElement;
 const rememberProviderInput = $('remember-provider') as HTMLInputElement;
 const formatInput = $('format') as HTMLSelectElement;
 const connectButton = $('connect-button') as HTMLButtonElement;
+const saveProviderButton = $('save-provider-button') as HTMLButtonElement;
 const message = $('message');
 const stateLabel = $('connection-state');
 const setupSection = $('setup');
@@ -44,6 +45,9 @@ const playPauseButton = $('play-pause') as HTMLButtonElement;
 
 const PAGE_SIZE = 72;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
+const APP_VERSION = '0.1.4';
+const versionLabel = $('app-version');
+versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: 'ts' | 'm3u8' };
 let credentials: { base: string; username: string; password: string } | null = null;
 let categories: Category[] = [];
@@ -91,9 +95,27 @@ function readSavedProvider(): SavedProvider | null {
 
 function saveProvider(saved: SavedProvider): boolean {
   try {
-    localStorage.setItem(REMEMBERED_PROVIDER_KEY, JSON.stringify(saved));
-    return true;
+    const serialized = JSON.stringify(saved);
+    localStorage.setItem(REMEMBERED_PROVIDER_KEY, serialized);
+    return localStorage.getItem(REMEMBERED_PROVIDER_KEY) === serialized;
   } catch {
+    return false;
+  }
+}
+
+function saveCurrentProvider(): boolean {
+  try {
+    const base = normalizedBase(serverInput.value);
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value;
+    if (!username || !password) throw new Error('Enter the URL, username, and password before saving.');
+    const saved = { base, username, password, format: formatInput.value === 'm3u8' ? 'm3u8' as const : 'ts' as const };
+    if (!saveProvider(saved)) throw new Error('TV storage did not confirm the saved login.');
+    rememberProviderInput.checked = true;
+    setMessage('Login saved on this TV.');
+    return true;
+  } catch (error) {
+    setMessage(error instanceof Error ? error.message : 'Could not save the login.', true);
     return false;
   }
 }
@@ -108,12 +130,12 @@ function normalizedBase(value: string): string {
   return parsed.toString().replace(/\/+$/, '');
 }
 
-async function api<T>(action?: string, extra: Record<string, string> = {}): Promise<T> {
+async function api<T>(action?: string, extra: Record<string, string> = {}, timeoutMs = 60_000): Promise<T> {
   if (!credentials) throw new Error('Connect to a provider first.');
   requestController?.abort();
   const controller = new AbortController();
   requestController = controller;
-  const timeout = window.setTimeout(() => controller.abort(), 15000);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   const query = new URLSearchParams({ username: credentials.username, password: credentials.password, ...extra });
   if (action) query.set('action', action);
   try {
@@ -158,25 +180,25 @@ async function loadProvider(): Promise<void> {
     // discard what the user entered. The opt-out removes any older saved login.
     if (rememberProviderInput.checked) {
       if (!saveProvider({ base, username, password, format: formatInput.value === 'm3u8' ? 'm3u8' : 'ts' })) {
-        setMessage('TV storage could not save the login. Connecting anyway.');
+        throw new Error('TV storage could not save the login. Uncheck “Remember this login” to connect without saving.');
       }
     } else {
       forgetProvider();
     }
 
     setProgress('Checking your provider login…');
-    const auth = await api<XtreamAuth>();
+    const auth = await api<XtreamAuth>(undefined, {}, 60_000);
     assertAuthenticated(auth);
     let categoryWarning = '';
     setProgress('Login accepted. Loading categories…');
-    const categoryResponse = await api<Category[]>('get_live_categories').catch(() => {
+    const categoryResponse = await api<Category[]>('get_live_categories', {}, 90_000).catch(() => {
       categoryWarning = 'Categories are unavailable; showing channels without category names. ';
       return [] as Category[];
     });
     categories = Array.isArray(categoryResponse) ? categoryResponse : [];
 
-    setProgress('Login accepted. Loading live channels…');
-    const channelResponse = await api<Channel[]>('get_live_streams');
+    setProgress('Login accepted. Loading live channels; this can take a few minutes…');
+    const channelResponse = await api<Channel[]>('get_live_streams', {}, 180_000);
     if (!Array.isArray(channelResponse)) throw new Error('Provider returned an invalid live channel list.');
     channels = channelResponse.filter((channel) => channel && channel.stream_id !== undefined && channel.name);
     if (!channels.length) throw new Error('The provider account has no live channels.');
@@ -313,14 +335,14 @@ form.addEventListener('submit', (event) => {
 });
 togglePasswordButton.addEventListener('click', () => {
   const show = passwordInput.type === 'password';
+  const currentValue = passwordInput.value;
   passwordInput.type = show ? 'text' : 'password';
+  passwordInput.value = currentValue;
   togglePasswordButton.textContent = show ? 'Hide' : 'Show';
   togglePasswordButton.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
   togglePasswordButton.setAttribute('aria-pressed', String(show));
 });
-rememberProviderInput.addEventListener('change', () => {
-  if (!rememberProviderInput.checked) forgetProvider();
-});
+saveProviderButton.addEventListener('click', saveCurrentProvider);
 categorySelect.addEventListener('change', () => renderChannels());
 moreButton.addEventListener('click', () => renderChannels(true));
 $('disconnect-button').addEventListener('click', disconnect);
@@ -361,7 +383,18 @@ window.addEventListener('keydown', (event) => {
 });
 
 const savedProvider = readSavedProvider();
-if (savedProvider) {
+const localProvider = {
+  base: (import.meta.env.VITE_XTREAM_URL ?? '').trim(),
+  username: (import.meta.env.VITE_XTREAM_USERNAME ?? '').trim(),
+  password: import.meta.env.VITE_XTREAM_PASSWORD ?? ''
+};
+if (localProvider.base && localProvider.username && localProvider.password) {
+  serverInput.value = localProvider.base;
+  usernameInput.value = localProvider.username;
+  passwordInput.value = localProvider.password;
+  setMessage('Using local test-provider settings embedded in this build.');
+  window.setTimeout(() => { void loadProvider(); }, 300);
+} else if (savedProvider) {
   rememberProviderInput.checked = true;
   serverInput.value = savedProvider.base;
   usernameInput.value = savedProvider.username;

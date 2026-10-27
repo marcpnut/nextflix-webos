@@ -28,6 +28,7 @@
             </div>
             <label class="remember-label"><input id="remember-provider" type="checkbox" checked /> Remember this login on this TV</label>
             <div class="actions">
+              <button id="save-provider-button" type="button">Save login</button>
               <button id="connect-button" class="primary" type="submit">Connect and load channels</button>
               <label class="format-label">Live format
                 <select id="format"><option value="ts">MPEG-TS (.ts)</option><option value="m3u8">HLS (.m3u8)</option></select>
@@ -35,6 +36,7 @@
             </div>
           </form>
           <div id="message" class="message" role="status" aria-live="polite"></div>
+          <p id="app-version" class="privacy-note"></p>
           <p class="privacy-note">When enabled, login details are saved in this app’s local storage on the TV. They are not encrypted or sent to NextFlix. They are sent to your IPTV provider when connecting and streaming.</p>
         </section>
 

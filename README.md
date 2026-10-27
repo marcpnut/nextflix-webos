@@ -5,10 +5,12 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 ## Phase 1 scope
 
 - Enter an Xtream server URL, username, and password, with a Show/Hide control to reveal the password.
-- Save the provider login before the connection attempt when remembering is enabled, so a failed request does not discard the entries.
+- Save the provider login explicitly with **Save login**, and save it again before connecting when remembering is enabled.
 - Show connection progress in both the form and top bar while requests are pending.
 - Reconnect automatically at launch when a login is saved.
+- Show the running app version on the setup screen.
 - Validate the account and load live categories/channels.
+- Allow up to 60 seconds for login, 90 seconds for categories, and 180 seconds for the channel list.
 - Play a channel with direct HTML5 video.
 - Switch channel with LG channel up/down keys or on-screen buttons.
 - Close playback with Back and clear the session with Disconnect.
@@ -39,7 +41,9 @@ The `homebrew/` directory contains the Homebrew Channel catalog and app manifest
 https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/repo.json
 ```
 
-The GitHub repository must be public for the TV's Homebrew Channel to download the catalog, manifest, and release asset without an account token. No provider credentials are included in the app or release.
+The GitHub repository must be public for the TV's Homebrew Channel to download the catalog, manifest, and release asset without an account token. Public releases are built without provider credentials. Never publish an IPK built with `.env.local` values.
+
+For a local-only provider test build, copy `.env.local.example` to `.env.local` and fill in the test provider URL, username, and password. Vite embeds these values in the generated app, so **never publish or upload an IPK built with real credentials**. The `.env.local` file is ignored by Git. Remove it before building a public release.
 
 ## Current limitations
 
