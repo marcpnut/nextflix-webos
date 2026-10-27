@@ -35,11 +35,48 @@
             </div>
           </form>
           <div id="message" class="message" role="status" aria-live="polite"></div>
-          <p id="app-version" class="privacy-note">NextFlix 0.2.1 · waiting for app script</p>
+          <p id="app-version" class="privacy-note">NextFlix 0.3.0 · waiting for app script</p>
           <p class="privacy-note">When enabled, login details are saved in this app’s local storage on the TV. They are not encrypted or sent to NextFlix. They are sent to your IPTV provider when connecting and streaming.</p>
         </section>
 
-        <section id="library" class="library hidden" aria-label="Live channels">
+        <div id="app-layout" class="app-layout hidden">
+          <aside id="sidebar" class="sidebar" aria-label="Main navigation">
+            <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Collapse navigation">☰</button>
+            <nav id="main-navigation">
+              <button data-page="home" data-icon="⌂" class="nav-button active">Home</button>
+              <button data-page="search" data-icon="⌕" class="nav-button">Search</button>
+              <button data-page="movies" data-icon="▣" class="nav-button">Movies</button>
+              <button data-page="series" data-icon="▤" class="nav-button">Series</button>
+              <button data-page="live" data-icon="◉" class="nav-button">Live TV</button>
+              <button data-page="my-list" data-icon="＋" class="nav-button">My List</button>
+              <button data-page="settings" data-icon="⚙" class="nav-button">Settings</button>
+            </nav>
+          </aside>
+          <div class="app-content">
+            <section id="home-view" class="home-view">
+              <div class="hero" id="home-hero">
+                <img id="hero-art" class="hero-art hidden" alt="" />
+                <div class="hero-copy"><div class="eyebrow">FEATURED</div><h1 id="hero-title">Your IPTV library</h1><p id="hero-description">Your movies and series appear here when the catalog has loaded.</p><div class="hero-actions"><button id="hero-play" class="primary">Play</button><button id="hero-browse" class="quiet">Browse movies</button></div></div>
+              </div>
+              <section class="home-row"><h2>Recently Added Movies</h2><div id="home-movies" class="poster-row"></div></section>
+              <section class="home-row"><h2>Popular Series</h2><div id="home-series" class="poster-row"></div></section>
+            </section>
+
+            <section id="detail-view" class="detail-view hidden">
+              <button id="detail-back" class="quiet detail-back">Back to browse</button>
+              <div class="detail-layout"><img id="detail-poster" class="detail-poster hidden" alt="" /><div><div class="eyebrow" id="detail-kind">TITLE</div><h1 id="detail-title"></h1><div id="detail-meta" class="detail-meta"></div><p id="detail-description" class="detail-description"></p><div class="hero-actions"><button id="detail-play" class="primary">Play</button><button id="detail-list" class="quiet">Add to My List</button></div></div></div>
+            </section>
+
+            <section id="settings-view" class="settings-view hidden">
+              <div class="eyebrow">PREFERENCES</div><h1>Settings</h1><p class="muted">Choose which provider categories appear while browsing.</p>
+              <label class="settings-type-label">Category group<select id="settings-category-type"><option value="live">Live TV</option><option value="movies">Movies</option><option value="series">Series</option></select></label>
+              <div class="settings-actions"><button id="show-all-categories">Show all</button><button id="hide-all-categories">Hide all</button></div>
+              <div id="category-visibility-list" class="category-visibility-list"></div>
+            </section>
+
+            <section id="my-list-view" class="my-list-view hidden"><div class="eyebrow">SAVED TITLES</div><h1>My List</h1><div id="my-list-items" class="channel-list"></div></section>
+
+            <section id="library" class="library hidden" aria-label="Media catalogue">
           <div class="library-heading">
             <div>
               <div class="eyebrow">CATALOG</div>
@@ -56,8 +93,20 @@
           <div id="library-message" class="message hidden" role="status" aria-live="polite"></div>
           <div id="channel-list" class="channel-list" role="list"></div>
           <button id="more-button" class="more-button hidden">Load more channels</button>
-        </section>
+            </section>
+          </div>
+        </div>
       </main>
+
+      <section id="exit-confirm" class="dialog-backdrop hidden" role="alertdialog" aria-modal="true" aria-labelledby="exit-title" aria-describedby="exit-description">
+        <div class="confirm-dialog">
+          <h2 id="exit-title">Exit NextFlix?</h2>
+          <p id="exit-description">Your saved login and viewing data will remain on this TV.</p>
+          <div class="confirm-actions"><button id="stay-button" class="primary">Stay</button><button id="exit-button" class="quiet">Exit app</button></div>
+        </div>
+      </section>
+
+      <div id="back-hint" class="back-hint hidden" role="status" aria-live="polite"></div>
 
       <section id="player" class="player hidden" aria-label="Video player">
         <video id="video" playsinline></video>

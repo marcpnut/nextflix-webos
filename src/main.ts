@@ -17,6 +17,7 @@ type XtreamAuth = {
 
 type LiveFormat = 'auto' | 'ts' | 'm3u8';
 type CatalogView = 'live' | 'movies' | 'series';
+type AppPage = 'home' | 'search' | 'movies' | 'series' | 'live' | 'my-list' | 'settings' | 'detail';
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -39,6 +40,29 @@ const message = $('message');
 const stateLabel = $('connection-state');
 const setupSection = $('setup');
 const librarySection = $('library');
+const appLayout = $('app-layout');
+const sidebar = $('sidebar');
+const homeView = $('home-view');
+const detailView = $('detail-view');
+const settingsView = $('settings-view');
+const myListView = $('my-list-view');
+const myListItems = $('my-list-items');
+const heroTitle = $('hero-title');
+const heroDescription = $('hero-description');
+const heroArt = $('hero-art') as HTMLImageElement;
+const heroPlayButton = $('hero-play') as HTMLButtonElement;
+const heroBrowseButton = $('hero-browse') as HTMLButtonElement;
+const homeMovies = $('home-movies');
+const homeSeries = $('home-series');
+const detailPoster = $('detail-poster') as HTMLImageElement;
+const detailKind = $('detail-kind');
+const detailTitle = $('detail-title');
+const detailMeta = $('detail-meta');
+const detailDescription = $('detail-description');
+const detailPlayButton = $('detail-play') as HTMLButtonElement;
+const detailListButton = $('detail-list') as HTMLButtonElement;
+const settingsCategoryType = $('settings-category-type') as HTMLSelectElement;
+const categoryVisibilityList = $('category-visibility-list');
 const categorySelect = $('category') as HTMLSelectElement;
 const channelList = $('channel-list');
 const catalogTitle = $('catalog-title');
@@ -48,6 +72,8 @@ const backToSeriesButton = $('back-to-series') as HTMLButtonElement;
 const moreButton = $('more-button') as HTMLButtonElement;
 const libraryMessage = $('library-message');
 const playerLayer = $('player');
+const exitConfirm = $('exit-confirm');
+const backHint = $('back-hint');
 const video = $('video') as HTMLVideoElement;
 const playerMessage = $('player-message');
 const playingTitle = $('playing-title');
@@ -56,7 +82,7 @@ const playPauseButton = $('play-pause') as HTMLButtonElement;
 const PAGE_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.2.1';
+const APP_VERSION = '0.3.0';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -73,12 +99,24 @@ let series: Series[] = [];
 let seriesEpisodes: SeriesEpisode[] = [];
 let activeSeries: Series | null = null;
 let catalogView: CatalogView = 'live';
+let currentPage: AppPage = 'home';
+let previousPage: AppPage = 'home';
+let detailReturnFocus: HTMLElement | null = null;
+let detailItem: { kind: 'movie'; item: Movie } | { kind: 'series'; item: Series } | null = null;
+let featuredItem: { kind: 'movie'; item: Movie } | { kind: 'series'; item: Series } | null = null;
+let hiddenCategoryIds: Record<CatalogView, Set<string>> = { live: new Set(), movies: new Set(), series: new Set() };
+let hiddenCategoriesKey = 'nextflix.hidden-categories.v1';
+let favorites = new Set<string>();
+const FAVORITES_KEY = 'nextflix.my-list.v1';
 let searchTimer = 0;
 let sourceType: 'xtream' | 'm3u' = 'xtream';
 let visibleChannels: Channel[] = [];
 let renderedCount = 0;
 let selectedChannel: Channel | null = null;
 let requestController: AbortController | null = null;
+let backPressCount = 0;
+let backPressResetTimer = 0;
+let backHintTimer = 0;
 
 function setMessage(text: string, isError = false): void {
   message.textContent = text;
@@ -323,15 +361,244 @@ function categoriesForView(): Category[] {
   return categories;
 }
 
+function isCategoryVisible(view: CatalogView, categoryId: string | number | undefined): boolean {
+  return categoryId === undefined || !hiddenCategoryIds[view].has(String(categoryId));
+}
+
+function saveHiddenCategories(): void {
+  try {
+    localStorage.setItem(hiddenCategoriesKey, JSON.stringify({
+      live: Array.from(hiddenCategoryIds.live),
+      movies: Array.from(hiddenCategoryIds.movies),
+      series: Array.from(hiddenCategoryIds.series)
+    }));
+  } catch { /* Category visibility remains session-local if storage is unavailable. */ }
+}
+
+function loadHiddenCategories(key: string): void {
+  hiddenCategoriesKey = `nextflix.hidden-categories.${m3uCatalogKey(key)}`;
+  try {
+    const saved = JSON.parse(localStorage.getItem(hiddenCategoriesKey) ?? '{}') as Partial<Record<CatalogView, unknown>>;
+    for (const view of ['live', 'movies', 'series'] as CatalogView[]) {
+      hiddenCategoryIds[view] = Array.isArray(saved[view]) ? new Set((saved[view] as unknown[]).map(String)) : new Set();
+    }
+  } catch {
+    hiddenCategoryIds = { live: new Set(), movies: new Set(), series: new Set() };
+  }
+}
+
+function favoriteKey(kind: 'movie' | 'series', id: number | string): string {
+  return `${kind}:${id}`;
+}
+
+function saveFavorites(): void {
+  try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(Array.from(favorites))); } catch { /* Keep favorites in memory for this session. */ }
+}
+
+function toggleFavorite(kind: 'movie' | 'series', id: number | string): void {
+  const key = favoriteKey(kind, id);
+  if (favorites.has(key)) favorites.delete(key); else favorites.add(key);
+  saveFavorites();
+  detailListButton.textContent = favorites.has(key) ? 'Remove from My List' : 'Add to My List';
+  if (currentPage === 'my-list') renderMyList();
+}
+
+function showMovieDetails(item: Movie): void {
+  if (currentPage !== 'detail') {
+    previousPage = currentPage;
+    detailReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  detailItem = { kind: 'movie', item };
+  detailKind.textContent = 'MOVIE';
+  detailTitle.textContent = item.name ?? 'Untitled movie';
+  detailMeta.textContent = [item.year, item.rating ? `★ ${item.rating}` : ''].filter(Boolean).join(' · ');
+  detailDescription.textContent = item.plot ?? 'No description supplied by the provider.';
+  detailPoster.src = item.stream_icon ?? '';
+  detailPoster.classList.toggle('hidden', !item.stream_icon);
+  detailPlayButton.textContent = 'Play movie';
+  detailListButton.textContent = favorites.has(favoriteKey('movie', item.stream_id)) ? 'Remove from My List' : 'Add to My List';
+  showPage('detail');
+}
+
+function showSeriesDetails(item: Series): void {
+  if (currentPage !== 'detail') {
+    previousPage = currentPage;
+    detailReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  detailItem = { kind: 'series', item };
+  detailKind.textContent = 'SERIES';
+  detailTitle.textContent = item.name ?? 'Untitled series';
+  detailMeta.textContent = [item.releaseDate, item.genre, item.rating ? `★ ${item.rating}` : ''].filter(Boolean).join(' · ');
+  detailDescription.textContent = item.plot ?? 'No description supplied by the provider.';
+  detailPoster.src = item.cover ?? '';
+  detailPoster.classList.toggle('hidden', !item.cover);
+  detailPlayButton.textContent = 'View episodes';
+  detailListButton.textContent = favorites.has(favoriteKey('series', item.series_id)) ? 'Remove from My List' : 'Add to My List';
+  showPage('detail');
+}
+
+function renderPosterRow(container: HTMLElement, kind: 'movie' | 'series', items: Array<Movie | Series>): void {
+  clearChildren(container);
+  for (const raw of items.slice(0, 12)) {
+    const item = raw as Movie & Series;
+    const title = item.name ?? 'Untitled';
+    const posterUrl = kind === 'movie' ? (item as Movie).stream_icon : (item as Series).cover;
+    if (!isCategoryVisible(kind === 'movie' ? 'movies' : 'series', item.category_id)) continue;
+    const button = document.createElement('button');
+    button.className = 'poster-tile';
+    button.type = 'button';
+    button.setAttribute('aria-label', `Open ${title}`);
+    if (posterUrl) {
+      const image = document.createElement('img');
+      image.src = posterUrl;
+      image.alt = '';
+      image.setAttribute('loading', 'lazy');
+      image.addEventListener('error', () => image.classList.add('hidden'));
+      button.appendChild(image);
+    }
+    const label = document.createElement('span');
+    label.textContent = title;
+    button.appendChild(label);
+    button.addEventListener('click', () => kind === 'movie' ? showMovieDetails(item as Movie) : showSeriesDetails(item as Series));
+    container.appendChild(button);
+  }
+}
+
+function renderHome(): void {
+  const firstMovie = movies.find((item) => isCategoryVisible('movies', item.category_id));
+  const firstSeries = series.find((item) => isCategoryVisible('series', item.category_id));
+  featuredItem = firstMovie ? { kind: 'movie', item: firstMovie } : firstSeries ? { kind: 'series', item: firstSeries } : null;
+  if (featuredItem) {
+    const item = featuredItem.item;
+    heroTitle.textContent = item.name ?? 'Featured title';
+    heroDescription.textContent = item.plot ?? (featuredItem.kind === 'movie' ? 'Featured from your movie catalog.' : 'Featured from your series catalog.');
+    const poster = featuredItem.kind === 'movie' ? (item as Movie).stream_icon : (item as Series).cover;
+    if (poster) {
+      heroArt.src = poster;
+      heroArt.classList.remove('hidden');
+    } else {
+      heroArt.removeAttribute('src');
+      heroArt.classList.add('hidden');
+    }
+    heroPlayButton.classList.remove('hidden');
+  } else {
+    heroTitle.textContent = 'Your IPTV library';
+    heroDescription.textContent = 'Movies and series from your provider will appear here.';
+    heroArt.removeAttribute('src');
+    heroArt.classList.add('hidden');
+    heroPlayButton.classList.add('hidden');
+  }
+  renderPosterRow(homeMovies, 'movie', movies.slice().sort((a, b) => Number(b.added ?? 0) - Number(a.added ?? 0)));
+  renderPosterRow(homeSeries, 'series', series);
+}
+
+function renderMyList(): void {
+  clearChildren(myListItems);
+  for (const key of favorites) {
+    const [kind, ...idParts] = key.split(':');
+    const id = idParts.join(':');
+    const movie = kind === 'movie' ? movies.find((item) => String(item.stream_id) === id) : undefined;
+    const show = kind === 'series' ? series.find((item) => String(item.series_id) === id) : undefined;
+    const title = movie?.name ?? show?.name;
+    if (!title) continue;
+    const button = document.createElement('button');
+    button.className = 'media-card';
+    button.type = 'button';
+    const posterUrl = movie?.stream_icon ?? show?.cover;
+    if (posterUrl) {
+      const image = document.createElement('img');
+      image.className = 'media-poster';
+      image.src = posterUrl;
+      image.alt = '';
+      image.setAttribute('loading', 'lazy');
+      button.appendChild(image);
+    }
+    const label = document.createElement('span');
+    label.className = 'media-card-title';
+    label.textContent = title;
+    button.appendChild(label);
+    button.addEventListener('click', () => movie ? showMovieDetails(movie) : showSeriesDetails(show!));
+    myListItems.appendChild(button);
+  }
+  if (!myListItems.firstChild) {
+    const empty = document.createElement('p');
+    empty.className = 'muted';
+    empty.textContent = 'Your list is empty. Open a movie or series and add it to My List.';
+    myListItems.appendChild(empty);
+  }
+}
+
+function renderCategorySettings(): void {
+  clearChildren(categoryVisibilityList);
+  const view = settingsCategoryType.value as CatalogView;
+  for (const category of view === 'live' ? categories : view === 'movies' ? movieCategories : seriesCategories) {
+    if (category.category_id === undefined || !category.category_name) continue;
+    const label = document.createElement('label');
+    label.className = 'category-visibility-item';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = !hiddenCategoryIds[view].has(String(category.category_id));
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) hiddenCategoryIds[view].delete(String(category.category_id));
+      else hiddenCategoryIds[view].add(String(category.category_id));
+      saveHiddenCategories();
+      updateCatalogHeading();
+      renderChannels();
+      renderHome();
+    });
+    const name = document.createElement('span');
+    name.textContent = category.category_name;
+    label.appendChild(checkbox);
+    label.appendChild(name);
+    categoryVisibilityList.appendChild(label);
+  }
+}
+
+function showPage(page: AppPage): void {
+  const leavingDetail = currentPage === 'detail' && page !== 'detail';
+  currentPage = page;
+  homeView.classList.toggle('hidden', page !== 'home');
+  detailView.classList.toggle('hidden', page !== 'detail');
+  settingsView.classList.toggle('hidden', page !== 'settings');
+  myListView.classList.toggle('hidden', page !== 'my-list');
+  const showCatalogPage = page === 'movies' || page === 'series' || page === 'live' || page === 'search';
+  librarySection.classList.toggle('hidden', !showCatalogPage);
+  if (page === 'movies' || page === 'series' || page === 'live') {
+    catalogView = page === 'live' ? 'live' : page;
+    catalogTypeSelect.value = catalogView;
+    activeSeries = null;
+    seriesEpisodes = [];
+  }
+  if (page === 'search') {
+    if (!['live', 'movies', 'series'].includes(catalogView)) catalogView = 'movies';
+    catalogTypeSelect.value = catalogView;
+  }
+  if (showCatalogPage && !leavingDetail) {
+    updateCatalogHeading();
+    renderChannels();
+  }
+  if (page === 'home') renderHome();
+  if (page === 'settings') renderCategorySettings();
+  if (page === 'my-list') renderMyList();
+  const selectedNavPage = page === 'detail' ? previousPage : page;
+  document.querySelectorAll<HTMLButtonElement>('.nav-button').forEach((button) => button.classList.toggle('active', button.dataset.page === selectedNavPage));
+  if (page === 'search') window.setTimeout(() => searchInput.focus(), 0);
+  if (leavingDetail && detailReturnFocus?.isConnected) {
+    detailReturnFocus.focus();
+    detailReturnFocus = null;
+  }
+}
+
 function updateCatalogHeading(): void {
   catalogTitle.textContent = activeSeries
     ? `${activeSeries.name ?? 'Series'} · Episodes`
-    : catalogView === 'movies' ? 'Movies' : catalogView === 'series' ? 'Series' : 'Live TV';
+    : currentPage === 'search' ? 'Search'
+      : catalogView === 'movies' ? 'Movies' : catalogView === 'series' ? 'Series' : 'Live TV';
   backToSeriesButton.classList.toggle('hidden', !activeSeries);
   clearChildren(categorySelect);
   categorySelect.appendChild(new Option('All categories', 'all'));
   for (const category of categoriesForView()) {
-    if (category.category_id === undefined || !category.category_name) continue;
+    if (category.category_id === undefined || !category.category_name || !isCategoryVisible(catalogView, category.category_id)) continue;
     categorySelect.appendChild(new Option(category.category_name, String(category.category_id)));
   }
 }
@@ -340,8 +607,8 @@ function showCatalog(cachedAt?: number): void {
   updateCatalogHeading();
   stateLabel.textContent = `${channels.length} channels`;
   setupSection.classList.add('hidden');
-  librarySection.classList.remove('hidden');
-  renderChannels();
+  appLayout.classList.remove('hidden');
+  showPage('home');
   if (cachedAt) {
     const ageHours = Math.max(0, Math.floor((Date.now() - cachedAt) / (60 * 60 * 1000)));
     libraryMessage.textContent = `Showing saved channels${ageHours ? ` · saved ${ageHours}h ago` : ''}.`;
@@ -376,6 +643,7 @@ async function saveCatalogSnapshot(key: string): Promise<void> {
 async function loadMoviesAndSeries(key: string): Promise<void> {
   const warnings: string[] = [];
   if (!credentials) return;
+  stateLabel.textContent = 'Loading movies in the background…';
   libraryMessage.textContent = 'Loading movies in the background…';
   libraryMessage.classList.remove('hidden', 'error');
   libraryMessage.classList.add('loading');
@@ -394,8 +662,10 @@ async function loadMoviesAndSeries(key: string): Promise<void> {
   }
   if (!credentials) return;
   await saveCatalogSnapshot(key);
-  if (!librarySection.classList.contains('hidden')) renderChannels();
+  if (currentPage === 'movies') renderChannels();
+  if (currentPage === 'home') renderHome();
 
+  stateLabel.textContent = 'Loading series in the background…';
   libraryMessage.textContent = 'Loading series in the background…';
   try {
     const categoryResponse = await api<Category[]>('get_series_categories', {}, 120_000);
@@ -416,6 +686,9 @@ async function loadMoviesAndSeries(key: string): Promise<void> {
     updateCatalogHeading();
     renderChannels();
   }
+  if (currentPage === 'home') renderHome();
+  if (currentPage === 'settings') renderCategorySettings();
+  if (currentPage === 'my-list') renderMyList();
   libraryMessage.textContent = warnings.length
     ? `Live TV is ready. ${warnings.join('; ')}. Your provider may not support these catalogs.`
     : `Ready · ${movies.length} movies · ${series.length} series`;
@@ -436,6 +709,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     if (sourceType === 'xtream' && (!username || !password)) throw new Error('Enter both username and password.');
     credentials = { base, username, password };
     cacheKey = sourceType === 'm3u' ? m3uCatalogKey(base) : catalogKey(base, username);
+    loadHiddenCategories(cacheKey);
 
     try {
       cache = await readCatalog(cacheKey);
@@ -496,7 +770,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       showCatalog();
       libraryMessage.textContent = `${channels.length} channels loaded from M3U.`;
       libraryMessage.classList.remove('hidden', 'loading', 'error');
-      channelList.querySelector<HTMLButtonElement>('button')?.focus();
+      document.querySelector<HTMLButtonElement>('.nav-button[data-page="home"]')?.focus();
       return;
     }
 
@@ -526,7 +800,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       libraryMessage.textContent = categoryWarning;
       libraryMessage.classList.remove('hidden', 'loading');
     }
-    channelList.querySelector<HTMLButtonElement>('button')?.focus();
+    document.querySelector<HTMLButtonElement>('.nav-button[data-page="home"]')?.focus();
     if (sourceType === 'xtream') window.setTimeout(() => { void loadMoviesAndSeries(cacheKey); }, 0);
   } catch (error) {
     const safeMessage = error instanceof Error ? error.message : 'Connection failed.';
@@ -550,6 +824,7 @@ function renderChannels(append = false): void {
   const query = searchInput.value.trim().toLowerCase();
   visibleChannels = catalogView === 'live' && !activeSeries
     ? channels.filter((channel) => (category === 'all' || String(channel.category_id ?? '') === category)
+      && isCategoryVisible('live', channel.category_id)
       && (!query || String(channel.name ?? '').toLowerCase().includes(query)))
     : [];
   const items: Array<{ title: string; poster?: string; meta?: string; channel?: Channel; onSelect: () => void }> = [];
@@ -570,18 +845,18 @@ function renderChannels(append = false): void {
     }
   } else if (catalogView === 'movies') {
     for (const movie of movies) {
-      if (category !== 'all' && String(movie.category_id ?? '') !== category) continue;
+      if (!isCategoryVisible('movies', movie.category_id) || (category !== 'all' && String(movie.category_id ?? '') !== category)) continue;
       const title = movie.name ?? 'Untitled movie';
       if (query && !title.toLowerCase().includes(query)) continue;
       const meta = [movie.year, movie.rating ? `★ ${movie.rating}` : ''].filter(Boolean).join(' · ');
-      items.push({ title, poster: movie.stream_icon, meta, onSelect: () => playVod(title, movie.stream_id, movie.container_extension, 'movie') });
+      items.push({ title, poster: movie.stream_icon, meta, onSelect: () => showMovieDetails(movie) });
     }
   } else {
     for (const item of series) {
-      if (category !== 'all' && String(item.category_id ?? '') !== category) continue;
+      if (!isCategoryVisible('series', item.category_id) || (category !== 'all' && String(item.category_id ?? '') !== category)) continue;
       const title = item.name ?? 'Untitled series';
       if (query && !title.toLowerCase().includes(query)) continue;
-      items.push({ title, poster: item.cover, meta: [item.releaseDate, item.genre].filter(Boolean).join(' · '), onSelect: () => { void openSeries(item); } });
+      items.push({ title, poster: item.cover, meta: [item.releaseDate, item.genre].filter(Boolean).join(' · '), onSelect: () => showSeriesDetails(item) });
     }
   }
   if (!append) {
@@ -732,7 +1007,9 @@ function closePlayer(): void {
   playerLayer.classList.add('hidden');
   playerMessage.textContent = '';
   selectedChannel = null;
-  channelList.querySelector<HTMLButtonElement>('button')?.focus();
+  if (!librarySection.classList.contains('hidden')) channelList.querySelector<HTMLButtonElement>('button')?.focus();
+  else if (!detailView.classList.contains('hidden')) detailPlayButton.focus();
+  else document.querySelector<HTMLButtonElement>(`.nav-button[data-page="${currentPage === 'detail' ? previousPage : currentPage}"]`)?.focus();
 }
 
 function switchChannel(direction: -1 | 1): void {
@@ -740,6 +1017,85 @@ function switchChannel(direction: -1 | 1): void {
   const index = visibleChannels.findIndex((channel) => String(channel.stream_id) === String(selectedChannel?.stream_id));
   const nextIndex = (index + direction + visibleChannels.length) % visibleChannels.length;
   void playChannel(visibleChannels[nextIndex]);
+}
+
+function resetBackSequence(): void {
+  backPressCount = 0;
+  window.clearTimeout(backPressResetTimer);
+  window.clearTimeout(backHintTimer);
+  backHint.classList.add('hidden');
+}
+
+function closeExitPrompt(): void {
+  exitConfirm.classList.add('hidden');
+  resetBackSequence();
+  document.querySelector<HTMLButtonElement>('.nav-button[data-page="home"]')?.focus();
+}
+
+function handleBackPress(): void {
+  if (!playerLayer.classList.contains('hidden')) {
+    resetBackSequence();
+    closePlayer();
+    return;
+  }
+  if (!exitConfirm.classList.contains('hidden')) {
+    closeExitPrompt();
+    return;
+  }
+  if (currentPage === 'detail') {
+    showPage(previousPage);
+    return;
+  }
+  if (currentPage !== 'home') {
+    showPage('home');
+    return;
+  }
+  backPressCount += 1;
+  window.clearTimeout(backPressResetTimer);
+  if (backPressCount < 3) {
+    const remaining = 3 - backPressCount;
+    backHint.textContent = `Press Back ${remaining === 1 ? 'once more' : `${remaining} more times`} to exit.`;
+    backHint.classList.remove('hidden');
+    window.clearTimeout(backHintTimer);
+    backHintTimer = window.setTimeout(() => backHint.classList.add('hidden'), 1800);
+    backPressResetTimer = window.setTimeout(resetBackSequence, 3500);
+    return;
+  }
+  resetBackSequence();
+  exitConfirm.classList.remove('hidden');
+  $('stay-button').focus();
+}
+
+function exitApplication(): void {
+  // LG documents window.close() for apps using a custom exit confirmation.
+  window.close();
+}
+
+function moveDirectionalFocus(keyCode: number): boolean {
+  const active = document.activeElement as HTMLElement | null;
+  if (!active || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT') return false;
+  const current = active.getBoundingClientRect();
+  const x = current.left + current.width / 2;
+  const y = current.top + current.height / 2;
+  let best: HTMLElement | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  const scope: ParentNode = exitConfirm.classList.contains('hidden') ? document : exitConfirm;
+  const candidates = scope.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled])');
+  for (const candidate of Array.from(candidates)) {
+    if (candidate === active || candidate.closest('.hidden')) continue;
+    const rect = candidate.getBoundingClientRect();
+    if (!rect.width || !rect.height) continue;
+    const dx = rect.left + rect.width / 2 - x;
+    const dy = rect.top + rect.height / 2 - y;
+    const primary = keyCode === 37 ? -dx : keyCode === 39 ? dx : keyCode === 38 ? -dy : dy;
+    if (primary <= 0) continue;
+    const secondary = keyCode === 37 || keyCode === 39 ? Math.abs(dy) : Math.abs(dx);
+    const score = primary + secondary * 1.6;
+    if (score < bestScore) { best = candidate; bestScore = score; }
+  }
+  if (!best) return false;
+  best.focus();
+  return true;
 }
 
 function disconnect(): void {
@@ -765,6 +1121,7 @@ function disconnect(): void {
   categorySelect.appendChild(new Option('All categories', 'all'));
   clearChildren(channelList);
   librarySection.classList.add('hidden');
+  appLayout.classList.add('hidden');
   setupSection.classList.remove('hidden');
   stateLabel.textContent = 'Not connected';
   const saved = rememberProviderInput.checked ? readSavedProvider() : null;
@@ -806,6 +1163,53 @@ backToSeriesButton.addEventListener('click', () => {
   renderChannels();
 });
 moreButton.addEventListener('click', () => renderChannels(true));
+document.querySelectorAll<HTMLButtonElement>('.nav-button').forEach((button) => {
+  button.addEventListener('click', () => showPage(button.dataset.page as AppPage));
+});
+$('sidebar-toggle').addEventListener('click', () => {
+  const collapsed = sidebar.classList.toggle('collapsed');
+  try { localStorage.setItem('nextflix.sidebar-collapsed.v1', String(collapsed)); } catch { /* Session-only preference. */ }
+});
+heroBrowseButton.addEventListener('click', () => showPage('movies'));
+heroPlayButton.addEventListener('click', () => {
+  if (!featuredItem) return;
+  if (featuredItem.kind === 'movie') playVod(featuredItem.item.name ?? 'Movie', featuredItem.item.stream_id, featuredItem.item.container_extension, 'movie');
+  else showSeriesDetails(featuredItem.item);
+});
+$('detail-back').addEventListener('click', () => showPage(previousPage));
+detailPlayButton.addEventListener('click', () => {
+  if (!detailItem) return;
+  if (detailItem.kind === 'movie') playVod(detailItem.item.name ?? 'Movie', detailItem.item.stream_id, detailItem.item.container_extension, 'movie');
+  else {
+    const item = detailItem.item;
+    showPage('series');
+    void openSeries(item);
+  }
+});
+detailListButton.addEventListener('click', () => {
+  if (detailItem?.kind === 'movie') toggleFavorite('movie', detailItem.item.stream_id);
+  else if (detailItem?.kind === 'series') toggleFavorite('series', detailItem.item.series_id);
+});
+settingsCategoryType.addEventListener('change', renderCategorySettings);
+$('show-all-categories').addEventListener('click', () => {
+  const view = settingsCategoryType.value as CatalogView;
+  hiddenCategoryIds[view].clear();
+  saveHiddenCategories();
+  renderCategorySettings();
+  updateCatalogHeading();
+  renderChannels();
+  renderHome();
+});
+$('hide-all-categories').addEventListener('click', () => {
+  const view = settingsCategoryType.value as CatalogView;
+  hiddenCategoryIds[view] = new Set((view === 'live' ? categories : view === 'movies' ? movieCategories : seriesCategories)
+    .filter((item) => item.category_id !== undefined).map((item) => String(item.category_id)));
+  saveHiddenCategories();
+  renderCategorySettings();
+  updateCatalogHeading();
+  renderChannels();
+  renderHome();
+});
 $('disconnect-button').addEventListener('click', disconnect);
 $('close-player').addEventListener('click', closePlayer);
 $('previous-channel').addEventListener('click', () => switchChannel(-1));
@@ -822,11 +1226,15 @@ video.addEventListener('error', () => {
 });
 
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' || event.key === 'Backspace' || event.keyCode === 461 || event.keyCode === 10009) {
-    if (!playerLayer.classList.contains('hidden')) {
-      event.preventDefault();
-      closePlayer();
-    }
+  const target = event.target as HTMLElement | null;
+  const isEditing = !!target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
+  if ([37, 38, 39, 40].includes(event.keyCode) && playerLayer.classList.contains('hidden')) {
+    if (!isEditing && moveDirectionalFocus(event.keyCode)) { event.preventDefault(); return; }
+  }
+  const isBack = event.keyCode === 461 || event.keyCode === 10009 || event.key === 'Escape' || (event.key === 'Backspace' && !isEditing);
+  if (isBack) {
+    event.preventDefault();
+    handleBackPress();
     return;
   }
   if (playerLayer.classList.contains('hidden')) return;
@@ -842,6 +1250,15 @@ window.addEventListener('keydown', (event) => {
     else video.pause();
   }
 });
+
+$('stay-button').addEventListener('click', closeExitPrompt);
+$('exit-button').addEventListener('click', exitApplication);
+
+try {
+  const savedFavorites = JSON.parse(localStorage.getItem(FAVORITES_KEY) ?? '[]') as unknown;
+  if (Array.isArray(savedFavorites)) favorites = new Set(savedFavorites.map(String));
+  sidebar.classList.toggle('collapsed', localStorage.getItem('nextflix.sidebar-collapsed.v1') === 'true');
+} catch { /* Defaults are used when local storage is unavailable. */ }
 
 const savedProvider = readSavedProvider();
 const localProvider = {
