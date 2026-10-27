@@ -4,8 +4,10 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 
 ## Phase 1 scope
 
-- Enter an Xtream server URL, username, and password, with an eye toggle to reveal the password.
-- Optionally remember the provider login on this TV and reconnect automatically at launch.
+- Enter an Xtream server URL, username, and password, with a Show/Hide control to reveal the password.
+- Save the provider login before the connection attempt when remembering is enabled, so a failed request does not discard the entries.
+- Show connection progress in both the form and top bar while requests are pending.
+- Reconnect automatically at launch when a login is saved.
 - Validate the account and load live categories/channels.
 - Play a channel with direct HTML5 video.
 - Switch channel with LG channel up/down keys or on-screen buttons.
@@ -43,7 +45,7 @@ The GitHub repository must be public for the TV's Homebrew Channel to download t
 
 - Provider CORS rules can block `player_api.php` requests in the TV app.
 - Codec and stream compatibility vary by provider and TV. No stream has been tested on the target TV yet.
-- Remembered credentials use unencrypted app local storage on the TV. The eye button only changes password visibility in the login form.
+- Remembered credentials use unencrypted app local storage on the TV. The Show/Hide control changes password visibility in the login form.
 - The player does not use the undocumented `com.webos.media` track API. Audio/subtitle enumeration is not implemented in Phase 1.
 - Catch-up, movies, series, profiles, EPG, and local pairing are outside Phase 1.
 

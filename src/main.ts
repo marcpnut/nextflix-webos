@@ -58,11 +58,18 @@ function setMessage(text: string, isError = false): void {
   message.classList.toggle('error', isError);
 }
 
+function setProgress(text: string): void {
+  setMessage(text);
+  stateLabel.textContent = text;
+}
+
 function setBusy(busy: boolean): void {
   connectButton.disabled = busy;
-  connectButton.textContent = busy ? 'Connecting…' : 'Connect and load channels';
+  connectButton.textContent = busy ? 'Connecting… Please wait' : 'Connect and load channels';
   form.setAttribute('aria-busy', String(busy));
   message.classList.toggle('loading', busy);
+  connectButton.classList.toggle('connecting', busy);
+  stateLabel.classList.toggle('loading', busy);
 }
 
 function readSavedProvider(): SavedProvider | null {
@@ -139,7 +146,7 @@ function assertAuthenticated(data: XtreamAuth): void {
 
 async function loadProvider(): Promise<void> {
   setBusy(true);
-  setMessage('Checking provider URL…');
+  setProgress('Checking provider URL…');
   try {
     const base = normalizedBase(serverInput.value);
     const username = usernameInput.value.trim();
@@ -147,21 +154,28 @@ async function loadProvider(): Promise<void> {
     if (!username || !password) throw new Error('Enter both username and password.');
     credentials = { base, username, password };
 
-    setMessage('Checking your provider login…');
+    // Persist before network access so a failed/slow provider request cannot
+    // discard what the user entered. The opt-out removes any older saved login.
+    if (rememberProviderInput.checked) {
+      if (!saveProvider({ base, username, password, format: formatInput.value === 'm3u8' ? 'm3u8' : 'ts' })) {
+        setMessage('TV storage could not save the login. Connecting anyway.');
+      }
+    } else {
+      forgetProvider();
+    }
+
+    setProgress('Checking your provider login…');
     const auth = await api<XtreamAuth>();
     assertAuthenticated(auth);
     let categoryWarning = '';
-    setMessage('Login accepted. Loading categories…');
+    setProgress('Login accepted. Loading categories…');
     const categoryResponse = await api<Category[]>('get_live_categories').catch(() => {
       categoryWarning = 'Categories are unavailable; showing channels without category names. ';
       return [] as Category[];
     });
     categories = Array.isArray(categoryResponse) ? categoryResponse : [];
-    if (rememberProviderInput.checked && !saveProvider({ base, username, password, format: formatInput.value === 'm3u8' ? 'm3u8' : 'ts' })) {
-      categoryWarning += 'TV storage could not save the login. ';
-    }
 
-    setMessage('Login accepted. Loading live channels…');
+    setProgress('Login accepted. Loading live channels…');
     const channelResponse = await api<Channel[]>('get_live_streams');
     if (!Array.isArray(channelResponse)) throw new Error('Provider returned an invalid live channel list.');
     channels = channelResponse.filter((channel) => channel && channel.stream_id !== undefined && channel.name);
@@ -183,7 +197,7 @@ async function loadProvider(): Promise<void> {
     credentials = null;
     const safeMessage = error instanceof Error ? error.message : 'Connection failed.';
     setMessage(safeMessage, true);
-    stateLabel.textContent = 'Not connected';
+    stateLabel.textContent = 'Connection failed';
   } finally {
     setBusy(false);
   }
