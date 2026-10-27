@@ -39,7 +39,7 @@ The target TV is a rooted LG 55NANO886PB running webOS 6.5.3 / Pear webOS. NextF
 
 ## Homebrew custom repository
 
-The `homebrew/` directory contains the Homebrew Channel catalog, app manifest, and versioned IPK for the public GitHub repository `marcpnut/nextflix-webos`. The manifest pins the package by SHA-256. Add this catalog URL in Homebrew Channel Settings → Repositories:
+The `homebrew/` directory contains the Homebrew Channel catalog, app manifest, and versioned IPK for the public GitHub repository `marcpnut/nextflix-webos`. The manifest pins the GitHub Release package by SHA-256. Add this catalog URL in Homebrew Channel Settings → Repositories:
 
 ```text
 https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/repo.json
