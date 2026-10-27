@@ -30,7 +30,8 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 - Save movies and series to a local My List.
 - Hide and restore provider categories; hidden categories are excluded from browsing, Home, and search.
 - Filter Live TV, Movies, Series, and Settings using the literal text before `|` or between the first two pipes (for example, `NL/PL | ...` or `|NL| ...`). Options are derived from category names; the filter is hidden on Home.
-- Seek VOD with the progress slider or remote Left/Right; short presses skip 10 seconds and holding accelerates seeking.
+- Seek VOD with the focused progress slider or remote Left/Right; short presses skip 10 seconds and holding accelerates seeking. When another player control is focused, Left/Right moves focus between controls instead.
+- In the catalogue toolbar, Search Left/Right moves directly to Browse/Category. Toolbar controls have increased spacing.
 - Save local VOD resume progress and show a Continue Watching row on Home. Movie details offer Resume and Start from beginning.
 - Use a full-screen player overlay with a top back arrow and white icon controls; VOD shows 10-second skip controls and Live TV shows previous/next channel controls.
 - Navigate closed dropdowns with the D-pad; press OK to open one, use Up/Down within its options, and Left/Right to move focus away.

@@ -94,7 +94,7 @@ const seekDuration = $('seek-duration');
 const PAGE_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.3.6';
+const APP_VERSION = '0.3.7';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -1654,6 +1654,11 @@ window.addEventListener('keydown', (event) => {
   const isTextEntry = !!target && ((target.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((target as HTMLInputElement).type))
     || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
   if (isArrow && playerLayer.classList.contains('hidden')) {
+    if (target === searchInput && (event.keyCode === 37 || event.keyCode === 39)) {
+      event.preventDefault();
+      (event.keyCode === 39 ? categorySelect : catalogTypeSelect).focus();
+      return;
+    }
     if ((!isTextEntry || isSearchVertical || isEmptySearchNavigation) && moveDirectionalFocus(event.keyCode)) { event.preventDefault(); return; }
     if (isSearchVertical) { event.preventDefault(); return; }
     if (isEmptySearchNavigation) { event.preventDefault(); return; }
@@ -1667,9 +1672,14 @@ window.addEventListener('keydown', (event) => {
   }
   if (playerLayer.classList.contains('hidden')) return;
   if ([37, 38, 39, 40].includes(event.keyCode)) {
-    if ((event.keyCode === 37 || event.keyCode === 39) && target !== seekBar) {
+    if ((event.keyCode === 37 || event.keyCode === 39) && target === seekBar) {
       event.preventDefault();
       beginSeekHold(event.keyCode === 37 ? -1 : 1);
+      return;
+    }
+    if (event.keyCode === 37 || event.keyCode === 39) {
+      event.preventDefault();
+      moveDirectionalFocus(event.keyCode);
       return;
     }
     if (event.keyCode === 38 || event.keyCode === 40) {
