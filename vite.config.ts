@@ -10,6 +10,8 @@ export default defineConfig({
     minify: 'esbuild',
     rollupOptions: {
       output: {
+        format: 'iife',
+        name: 'NextFlix',
         entryFileNames: 'assets/app.js',
         assetFileNames: 'assets/[name][extname]',
         chunkFileNames: 'assets/[name].js'

@@ -31,7 +31,7 @@ pnpm install
 pnpm build
 ```
 
-Vite emits the static app into `dist/`, targeting Chromium 79. The metadata and original icons in `public/` are copied into `dist/`. Run `pnpm package` to create the IPK in `packages/`; this uses LG's webOS TV CLI (`@webos-tools/cli`).
+Vite emits the static app into `dist/`, targeting Chromium 79. The package build rewrites Vite's module entry to a self-contained classic script because webOS launches packaged app resources from a `file:` URL. The metadata and original icons in `public/` are copied into `dist/`. Run `pnpm package` to create the IPK in `packages/`; this uses LG's webOS TV CLI (`@webos-tools/cli`).
 
 ## Rooted LG TV installation
 
