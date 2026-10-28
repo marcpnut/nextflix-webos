@@ -3,7 +3,7 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 
 const background = [16, 17, 22];
-const red = [240, 68, 85];
+const accent = [167, 139, 250];
 const white = [255, 255, 255];
 
 function crc32(buffer) {
@@ -64,12 +64,13 @@ function png(size) {
   const unit = size / 130;
   const p = (value) => value * unit;
   // A bold, borderless NF monogram that remains visible when webOS applies its own icon mask.
-  rect(p(20), p(29), p(11), p(72), red);
-  rect(p(57), p(29), p(11), p(72), red);
-  polygon([[p(28), p(29)], [p(40), p(29)], [p(67), p(87)], [p(67), p(101)], [p(56), p(101)]], red);
-  rect(p(75), p(29), p(12), p(72), white);
-  rect(p(75), p(29), p(43), p(12), white);
-  rect(p(75), p(59), p(35), p(12), white);
+  rect(p(20), p(29), p(11), p(72), white);
+  rect(p(57), p(29), p(11), p(72), white);
+  polygon([[p(28), p(29)], [p(40), p(29)], [p(67), p(87)], [p(67), p(101)], [p(56), p(101)]], white);
+  polygon([[p(40), p(57)], [p(52), p(65)], [p(40), p(73)]], accent);
+  rect(p(75), p(29), p(12), p(72), accent);
+  rect(p(75), p(29), p(43), p(12), accent);
+  rect(p(75), p(59), p(35), p(12), accent);
 
   const rows = Buffer.alloc(size * (1 + size * 4));
   for (let y = 0; y < size; y += 1) {

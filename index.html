@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="violet">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,7 +9,7 @@
   <body>
     <div id="app">
       <header class="topbar">
-        <div class="brand" aria-label="NextFlix"><span>Next</span>Flix</div>
+        <div class="brand" aria-label="NextFlix"><span class="brand-next">Ne<span class="brand-x">x</span>t</span><span class="brand-flix">Flix</span></div>
         <div id="connection-state" class="connection-state" role="status" aria-live="polite">Not connected</div>
       </header>
 
@@ -43,17 +43,16 @@
           <aside id="sidebar" class="sidebar" aria-label="Main navigation">
             <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Collapse navigation">☰</button>
             <nav id="main-navigation">
-              <button data-page="home" aria-label="Home" class="nav-button active"><img class="nav-icon" src="icons/home.png" alt="" /><span>Home</span></button>
-              <button data-page="search" aria-label="Search" class="nav-button"><img class="nav-icon" src="icons/search.png" alt="" /><span>Search</span></button>
-              <button data-page="movies" aria-label="Movies" class="nav-button"><img class="nav-icon" src="icons/movies.png" alt="" /><span>Movies</span></button>
-              <button data-page="series" aria-label="Series" class="nav-button"><img class="nav-icon" src="icons/series.png" alt="" /><span>Series</span></button>
-              <button data-page="live" aria-label="Live TV" class="nav-button"><img class="nav-icon" src="icons/live.png" alt="" /><span>Live TV</span></button>
-              <button data-page="my-list" aria-label="My List" class="nav-button"><img class="nav-icon" src="icons/my-list.png" alt="" /><span>My List</span></button>
-              <button data-page="settings" aria-label="Settings" class="nav-button"><img class="nav-icon" src="icons/settings.png" alt="" /><span>Settings</span></button>
+              <button data-page="home" aria-label="Home" class="nav-button active"><svg class="nav-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M4.5 14.2 16 4.8l11.5 9.4M7.5 12v15h17V12M13 27v-9h6v9" /></svg><span>Home</span></button>
+              <button data-page="movies" aria-label="Movies" class="nav-button"><svg class="nav-icon" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="17" r="11" /><circle cx="16" cy="17" r="2.2" /><circle cx="16" cy="10.5" r="1.6" /><circle cx="21.7" cy="14.1" r="1.6" /><circle cx="19.5" cy="20.8" r="1.6" /><circle cx="12.5" cy="20.8" r="1.6" /><circle cx="10.3" cy="14.1" r="1.6" /></svg><span>Movies</span></button>
+              <button data-page="series" aria-label="Series" class="nav-button"><svg class="nav-icon" viewBox="0 0 32 32" aria-hidden="true"><rect x="4.5" y="5.5" width="23" height="18" rx="2" /><path d="m14 10.5 7 4-7 4zM11 27h10M16 23.5V27" /></svg><span>Series</span></button>
+              <button data-page="live" aria-label="Live TV" class="nav-button"><svg class="nav-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 17v11M11 28h10M12 13a5.7 5.7 0 0 1 8 0M8.5 9.5a10.6 10.6 0 0 1 15 0M5.5 6.5a14.8 14.8 0 0 1 21 0" /><circle cx="16" cy="17" r="1.8" /></svg><span>Live TV</span></button>
+              <button data-page="my-list" aria-label="My List" class="nav-button"><svg class="nav-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M8 4.5h16v23l-8-5.5-8 5.5zM11.5 13l3.2 3.2 6-6" /></svg><span>My List</span></button>
+              <button data-page="settings" aria-label="Settings" class="nav-button"><svg class="nav-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="m13.4 3.8.7 2.6a10.3 10.3 0 0 1 3.8 0l.7-2.6 3.4 1.4-.9 2.6a10.6 10.6 0 0 1 2.7 2.7l2.6-.9 1.4 3.4-2.6.7a10.3 10.3 0 0 1 0 3.8l2.6.7-1.4 3.4-2.6-.9a10.6 10.6 0 0 1-2.7 2.7l.9 2.6-3.4 1.4-.7-2.6a10.3 10.3 0 0 1-3.8 0l-.7 2.6-3.4-1.4.9-2.6a10.6 10.6 0 0 1-2.7-2.7l-2.6.9-1.4-3.4 2.6-.7a10.3 10.3 0 0 1 0-3.8l-2.6-.7 1.4-3.4 2.6.9a10.6 10.6 0 0 1 2.7-2.7l-.9-2.6z" transform="translate(0 0) scale(.9) translate(1.8 1.8)" /><circle cx="16" cy="16" r="3.5" /></svg><span>Settings</span></button>
             </nav>
             <div class="sidebar-profile">
               <span class="sidebar-profile-caption">VIEWER</span><strong id="active-profile-name">Default</strong>
-              <button id="profile-switch" class="quiet" aria-label="Switch viewer profile"><img class="profile-switch-icon" src="icons/profile-switch.png" alt="" />Switch profile</button>
+              <button id="profile-switch" class="quiet" aria-label="Switch viewer profile"><svg class="profile-switch-icon" viewBox="0 0 32 32" aria-hidden="true"><circle cx="12" cy="11" r="5" /><path d="M3.5 27a8.5 8.5 0 0 1 17 0M21 10h7l-2.5-2.5M28 10l-2.5 2.5M28.5 22h-7l2.5 2.5M21.5 22l2.5-2.5" /></svg><span>Switch profile</span></button>
             </div>
           </aside>
           <div class="app-content">
@@ -77,6 +76,11 @@
 
             <section id="settings-view" class="settings-view hidden">
               <div class="eyebrow">PREFERENCES</div><h1>Settings</h1><p class="muted">Choose which provider categories appear while browsing.</p>
+              <section class="theme-settings" aria-labelledby="theme-settings-title">
+                <h2 id="theme-settings-title">Appearance</h2>
+                <p class="muted">Choose a color theme for NextFlix. Your choice is saved on this TV.</p>
+                <label>Color theme<select id="theme-select"><option value="violet">Electric Violet</option><option value="emerald">Emerald Night</option><option value="arctic">Arctic Cyan</option><option value="signal">Signal Red</option></select></label>
+              </section>
               <label class="settings-type-label">Category group<select id="settings-category-type"><option value="live">Live TV</option><option value="movies">Movies</option><option value="series">Series</option></select></label>
               <section class="track-preferences" aria-labelledby="track-preferences-title">
                 <h2 id="track-preferences-title">Playback languages</h2>

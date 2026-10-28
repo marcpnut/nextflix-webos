@@ -26,7 +26,8 @@ type XtreamAuth = {
 
 type LiveFormat = 'auto' | 'ts' | 'm3u8';
 type CatalogView = 'live' | 'movies' | 'series';
-type AppPage = 'home' | 'search' | 'movies' | 'series' | 'live' | 'my-list' | 'settings' | 'detail';
+type AppPage = 'home' | 'movies' | 'series' | 'live' | 'my-list' | 'settings' | 'detail';
+type AppTheme = 'violet' | 'emerald' | 'arctic' | 'signal';
 
 const $ = <T extends HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -89,6 +90,7 @@ const detailPlayButton = $('detail-play') as HTMLButtonElement;
 const detailListButton = $('detail-list') as HTMLButtonElement;
 const detailStartOverButton = $('detail-start-over') as HTMLButtonElement;
 const settingsCategoryType = $('settings-category-type') as HTMLSelectElement;
+const themeSelect = $('theme-select') as HTMLSelectElement;
 const categoryVisibilityList = $('category-visibility-list');
 const categorySelect = $('category') as HTMLSelectElement;
 const channelList = $('channel-list');
@@ -148,7 +150,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.6.7';
+const APP_VERSION = '1.0.0';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -185,6 +187,8 @@ let activeProfileId = 'default';
 const FAVORITES_KEY = 'nextflix.my-list.v1';
 const WATCH_HISTORY_KEY = 'nextflix.watch-history.v1';
 const TRACK_PREFERENCES_KEY = 'nextflix.track-preferences.v1';
+const THEME_PREFERENCE_KEY = 'nextflix.theme.v1';
+const APP_THEMES: AppTheme[] = ['violet', 'emerald', 'arctic', 'signal'];
 const TMDB_API_KEY = 'nextflix.tmdb-api-key.v1';
 const HOME_PLAYLIST_SETTINGS_KEY = 'nextflix.home-playlists.v1';
 const HOME_PLAYLIST_CACHE_KEY = 'nextflix.home-playlist-cache.v1';
@@ -266,6 +270,24 @@ const webOsSubtitleAdapter = new WebOsMediaSubtitleAdapter();
 let episodeCountdownTimer = 0;
 let nextEpisode: SeriesEpisode | null = null;
 const observedTrackLists = new WeakSet<object>();
+
+function setAppTheme(theme: AppTheme, persist = false): void {
+  const selected: AppTheme = APP_THEMES.includes(theme) ? theme : 'violet';
+  document.documentElement.dataset.theme = selected;
+  themeSelect.value = selected;
+  document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute(
+    'content', getComputedStyle(document.documentElement).getPropertyValue('--app-bg').trim()
+  );
+  if (persist) {
+    try { localStorage.setItem(THEME_PREFERENCE_KEY, selected); } catch { /* The theme remains active for this session. */ }
+  }
+}
+
+function loadAppTheme(): void {
+  let saved: string | null = null;
+  try { saved = localStorage.getItem(THEME_PREFERENCE_KEY); } catch { /* The built-in Violet theme remains the default. */ }
+  setAppTheme(APP_THEMES.includes(saved as AppTheme) ? saved as AppTheme : 'violet');
+}
 
 function setMessage(text: string, isError = false): void {
   message.textContent = text;
@@ -754,7 +776,7 @@ function selectedLanguageView(): CatalogView {
 
 function renderLanguageFilter(): void {
   const visible = currentPage === 'settings' || currentPage === 'movies' || currentPage === 'series'
-    || currentPage === 'live' || currentPage === 'search';
+    || currentPage === 'live';
   languageFilter.classList.toggle('hidden', !visible);
   if (!visible) return;
   const view = selectedLanguageView();
@@ -2067,15 +2089,12 @@ function showPage(page: AppPage): void {
   detailView.classList.toggle('hidden', page !== 'detail');
   settingsView.classList.toggle('hidden', page !== 'settings');
   myListView.classList.toggle('hidden', page !== 'my-list');
-  const showCatalogPage = page === 'movies' || page === 'series' || page === 'live' || page === 'search';
+  const showCatalogPage = page === 'movies' || page === 'series' || page === 'live';
   librarySection.classList.toggle('hidden', !showCatalogPage);
   if (page === 'movies' || page === 'series' || page === 'live') {
     catalogView = page === 'live' ? 'live' : page;
     activeSeries = null;
     seriesEpisodes = [];
-  }
-  if (page === 'search') {
-    if (!['live', 'movies', 'series'].includes(catalogView)) catalogView = 'movies';
   }
   placeLanguageFilter();
   syncLiveChannelScrollMode();
@@ -2092,7 +2111,6 @@ function showPage(page: AppPage): void {
   const selectedNavPage = page === 'detail' ? previousPage : page;
   document.querySelectorAll<HTMLButtonElement>('.nav-button').forEach((button) => button.classList.toggle('active', button.dataset.page === selectedNavPage));
   syncAllDropdowns();
-  if (page === 'search') window.setTimeout(() => focusInputProxy(searchInput), 0);
   if (leavingDetail && detailReturnFocus?.isConnected) {
     detailReturnFocus.focus();
     detailReturnFocus = null;
@@ -2104,8 +2122,7 @@ function updateCatalogHeading(): void {
   renderLanguageFilter();
   catalogTitle.textContent = activeSeries
     ? `${activeSeries.name ?? 'Series'} · Episodes`
-    : currentPage === 'search' ? 'Search'
-      : catalogView === 'movies' ? 'Movies' : catalogView === 'series' ? 'Series' : 'Live TV';
+    : catalogView === 'movies' ? 'Movies' : catalogView === 'series' ? 'Series' : 'Live TV';
   backToSeriesButton.classList.toggle('hidden', !activeSeries);
   clearChildren(categorySelect);
   categorySelect.appendChild(new Option('All categories', 'all'));
@@ -2147,7 +2164,7 @@ function placeLanguageFilter(): void {
     appContent.insertBefore(languageFilter, settingsView);
     return;
   }
-  if (['movies', 'series', 'live', 'search'].includes(currentPage) && !librarySection.classList.contains('hidden')) {
+  if (['movies', 'series', 'live'].includes(currentPage) && !librarySection.classList.contains('hidden')) {
     const actions = librarySection.querySelector<HTMLElement>('.library-actions');
     if (actions) actions.insertBefore(languageFilter, actions.firstChild);
     return;
@@ -2157,7 +2174,7 @@ function placeLanguageFilter(): void {
 
 function showCatalog(cachedAt?: number): void {
   updateCatalogHeading();
-  stateLabel.textContent = `${channels.length} channels`;
+  stateLabel.textContent = 'Connected';
   setupSection.classList.add('hidden');
   appLayout.classList.remove('hidden');
   showPage('home');
@@ -2236,7 +2253,7 @@ async function loadMoviesAndSeries(key: string, generation: number): Promise<voi
     ? `Live TV is ready. ${warnings.join('; ')}. Your provider may not support these catalogs.`
     : `Ready · ${movies.length} movies · ${series.length} series`;
   libraryMessage.classList.remove('hidden', 'error', 'loading');
-  stateLabel.textContent = `${channels.length} live channels · ${movies.length} movies · ${series.length} series`;
+  stateLabel.textContent = 'Connected';
 }
 
 async function loadProvider(options: { startup?: boolean } = {}): Promise<void> {
@@ -2279,7 +2296,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       showCatalog(cache.savedAt);
       const fresh = Date.now() - cache.savedAt < CATALOG_REFRESH_MS;
       if (fresh && options.startup && (sourceType === 'm3u' || (Array.isArray(cache.movies) && Array.isArray(cache.series)))) {
-        stateLabel.textContent = `${channels.length} channels · saved`;
+        stateLabel.textContent = 'Connected';
         libraryMessage.textContent = 'Using your saved channels. They refresh automatically after 24 hours.';
         setBusy(false);
         return;
@@ -2362,7 +2379,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       libraryMessage.textContent = `Could not refresh channels. Showing the saved list. ${safeMessage}`;
       libraryMessage.classList.remove('hidden', 'loading');
       libraryMessage.classList.add('error');
-      stateLabel.textContent = `${channels.length} saved channels`;
+      stateLabel.textContent = 'Using cached library';
     } else {
       credentials = null;
       setMessage(safeMessage, true);
@@ -3196,7 +3213,7 @@ backToSeriesButton.addEventListener('click', () => {
 });
 moreButton.addEventListener('click', () => renderChannels(true));
 channelListScroll.addEventListener('scroll', () => {
-  if (catalogView !== 'live' || activeSeries || (currentPage !== 'live' && currentPage !== 'search')) return;
+  if (catalogView !== 'live' || activeSeries || currentPage !== 'live') return;
   const remaining = channelListScroll.scrollHeight - channelListScroll.scrollTop - channelListScroll.clientHeight;
   if (remaining < 320 && renderedCount < visibleChannels.length) renderChannels(true);
 });
@@ -3248,6 +3265,9 @@ detailListButton.addEventListener('click', () => {
 settingsCategoryType.addEventListener('change', () => {
   renderLanguageFilter();
   renderCategorySettings();
+});
+themeSelect.addEventListener('change', () => {
+  setAppTheme(themeSelect.value as AppTheme, true);
 });
 $('show-all-categories').addEventListener('click', () => {
   const view = settingsCategoryType.value as CatalogView;
@@ -3523,6 +3543,7 @@ try {
   opensubtitlesKeyInput.value = opensubtitlesKey;
 } catch { /* Optional API keys remain unavailable when local storage is blocked. */ }
 loadHomePlaylistPreferences();
+loadAppTheme();
 populateLanguagePreferences();
 loadTrackPreferencesForProfile();
 
