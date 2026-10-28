@@ -1,0 +1,16 @@
+{
+  "id": "com.nextflix.iptv",
+  "version": "1.0.18",
+  "type": "web",
+  "title": "NextFlix",
+  "appDescription": "Pass native webOS input keys through without app-level interception.",
+  "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
+  "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
+  "rootRequired": false,
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.18_all.ipk",
+  "ipkHash": {
+    "sha256": "2a2b4178163d55bb6337aa13cd2c8415f9b75bc1a72f2a780b2dabd06199c92f"
+  },
+  "ipkSize": 68006,
+  "installedSize": 205432
+}
