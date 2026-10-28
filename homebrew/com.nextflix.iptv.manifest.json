@@ -1,16 +1,16 @@
 {
   "id": "com.nextflix.iptv",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "type": "web",
   "title": "NextFlix",
-  "appDescription": "Restore native webOS login keyboard controls and URL field type.",
+  "appDescription": "Native webOS keyboard key handling and URL input compatibility fix.",
   "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
   "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
   "rootRequired": false,
-  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.15_all.ipk",
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.16_all.ipk",
   "ipkHash": {
-    "sha256": "f17602ce3dea300379fbc99c03771a0c48d558d575d82ff5f66cd07a3b8afaed"
+    "sha256": "29b35a0a89f1c4ab6aa8539bd3cf9a13e6506278e0a988b587bc464418d54147"
   },
-  "ipkSize": 68018,
+  "ipkSize": 68086,
   "installedSize": 205432
 }

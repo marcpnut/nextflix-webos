@@ -158,7 +158,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.15';
+const APP_VERSION = '1.0.16';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -278,6 +278,8 @@ let playerPlaybackActive = false;
 let activeDropdown: DropdownControl | null = null;
 let focusedDropdownOption = 0;
 let editingInput: HTMLInputElement | null = null;
+let webOsKeyboardVisible = false;
+let webOsKeyboardHideTimer = 0;
 const inputProxies = new Map<HTMLInputElement, HTMLButtonElement>();
 const dropdownControls = new Map<HTMLSelectElement, DropdownControl>();
 let preferredSubtitleLanguages = ['nl'];
@@ -1002,7 +1004,7 @@ function nativeWebOsKeyboardOwnsInput(): boolean {
   return document.documentElement.classList.contains('webos-tv')
     && !!editingInput
     && !editingInput.hidden
-    && document.activeElement === editingInput;
+    && (webOsKeyboardVisible || document.activeElement === editingInput);
 }
 
 function endInputEditing(): void {
@@ -3870,6 +3872,19 @@ video.addEventListener('error', () => {
   if (video.parentElement === livePreview) livePreviewMessage.textContent = error;
 });
 
+document.addEventListener('keyboardStateChange', (event: Event) => {
+  const visibility = Boolean((event as CustomEvent<{ visibility?: boolean }>).detail?.visibility);
+  webOsKeyboardVisible = visibility;
+  window.clearTimeout(webOsKeyboardHideTimer);
+  if (!visibility && editingInput && document.documentElement.classList.contains('webos-tv')) {
+    // The keyboard briefly hides while voice entry starts. Wait for that
+    // transition to settle before returning focus to the non-editing proxy.
+    webOsKeyboardHideTimer = window.setTimeout(() => {
+      if (!webOsKeyboardVisible && editingInput) endInputEditing();
+    }, 500);
+  }
+}, false);
+
 window.addEventListener('keydown', (event) => {
   const target = document.activeElement as HTMLElement | null;
   const keyName = (event.key || '').toLowerCase();
@@ -3884,14 +3899,7 @@ window.addEventListener('keydown', (event) => {
     || keyName === 'browserback' || keyName === 'goback' || (keyName === 'backspace' && !editingInput);
 
   if (editingInput && nativeWebOsKeyboardOwnsInput()) {
-    // On webOS the native virtual keyboard handles its own arrow navigation,
-    // Backspace and text entry. Intercepting those keys here breaks the OSK.
-    if (isBack && keyCode !== 8) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      endInputEditing();
-    }
+    // Let the native webOS keyboard receive all of its own keys unmodified.
     return;
   }
 

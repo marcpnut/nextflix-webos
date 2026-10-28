@@ -1,6 +1,6 @@
 {
   "id": "com.nextflix.iptv",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "vendor": "NextFlix",
   "type": "web",
   "main": "index.html",
