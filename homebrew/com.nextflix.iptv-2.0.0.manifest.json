@@ -1,0 +1,16 @@
+{
+  "id": "com.nextflix.iptv",
+  "version": "2.0.0",
+  "type": "web",
+  "title": "NextFlix",
+  "appDescription": "Persistent Live TV, Movies, and Series catalogs with offline cache and scheduled refresh while the app is open.",
+  "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
+  "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
+  "rootRequired": false,
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_2.0.0_all.ipk",
+  "ipkHash": {
+    "sha256": "cdd09e919a1cefe06f7304549544cf036ccf63dd5b9c9a58c34ccfa94df44f12"
+  },
+  "ipkSize": 71602,
+  "installedSize": 226233.0
+}
