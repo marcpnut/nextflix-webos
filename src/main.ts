@@ -157,7 +157,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.12';
+const APP_VERSION = '1.0.13';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -961,7 +961,7 @@ function editInputCharacter(input: HTMLInputElement, backwards: boolean): void {
   const to = start !== end ? end : backwards ? end : Math.min(length, end + 1);
   if (from === to) return;
   input.value = `${input.value.slice(0, from)}${input.value.slice(to)}`;
-  input.setSelectionRange(from, from);
+  try { input.setSelectionRange(from, from); } catch { /* Some TV IMEs do not expose caret APIs. */ }
   emitInputChanged(input);
 }
 
@@ -972,7 +972,7 @@ function moveInputCaret(input: HTMLInputElement, direction: -1 | 1): void {
   const position = start !== end
     ? direction < 0 ? start : end
     : Math.max(0, Math.min(length, start + direction));
-  input.setSelectionRange(position, position);
+  try { input.setSelectionRange(position, position); } catch { /* Keep key handling local even without caret APIs. */ }
 }
 
 function endInputEditing(): void {
