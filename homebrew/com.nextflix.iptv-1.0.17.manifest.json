@@ -1,0 +1,16 @@
+{
+  "id": "com.nextflix.iptv",
+  "version": "1.0.17",
+  "type": "web",
+  "title": "NextFlix",
+  "appDescription": "Synchronous native keyboard activation for webOS login fields.",
+  "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
+  "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
+  "rootRequired": false,
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.17_all.ipk",
+  "ipkHash": {
+    "sha256": "8e74bfb2368e11e5117d4d1791dcb02ad284a7b2015c08326ca0480a8762db31"
+  },
+  "ipkSize": 68102,
+  "installedSize": 205432
+}

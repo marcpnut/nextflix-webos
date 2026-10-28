@@ -158,7 +158,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.16';
+const APP_VERSION = '1.0.17';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -960,16 +960,13 @@ function beginInputEditing(input: HTMLInputElement): void {
   input.readOnly = false;
   input.tabIndex = 0;
   proxy.hidden = true;
-  // Older webOS WebKit may ignore focus() in the same task that unhides an
-  // input. Defer focus so the native text editor attaches to the real field.
-  window.setTimeout(() => {
-    if (editingInput !== input || input.hidden) return;
-    input.focus();
-    try {
-      const end = input.value.length;
-      input.setSelectionRange(end, end);
-    } catch { /* Keep focus even when a platform input does not expose selection. */ }
-  }, 0);
+  // Focus synchronously inside the remote-OK/click gesture. webOS uses this
+  // user activation to open its native keyboard; deferring it can lose that.
+  input.focus();
+  try {
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  } catch { /* Keep focus even if the platform does not expose caret APIs. */ }
 }
 
 function emitInputChanged(input: HTMLInputElement): void {
@@ -3987,6 +3984,11 @@ window.addEventListener('keydown', (event) => {
   if (isOK && target) {
     const proxyInput = Array.from(inputProxies.entries()).find(([, proxy]) => proxy === target)?.[0];
     if (proxyInput) {
+      if (document.documentElement.classList.contains('webos-tv')) {
+        // Let webOS perform the native button click. The proxy's click handler
+        // then focuses the real input during that trusted activation gesture.
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       beginInputEditing(proxyInput);
