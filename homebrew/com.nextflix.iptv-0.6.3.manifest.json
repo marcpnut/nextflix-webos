@@ -1,0 +1,16 @@
+{
+  "id": "com.nextflix.iptv",
+  "version": "0.6.3",
+  "type": "web",
+  "title": "NextFlix",
+  "appDescription": "A lightweight IPTV player with OMDb movie details and optional external subtitles.",
+  "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/largeIcon.png",
+  "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
+  "rootRequired": false,
+  "ipkUrl": "https://github.com/marcpnut/nextflix-webos/releases/download/v0.6.3/com.nextflix.iptv_0.6.3_all.ipk",
+  "ipkHash": {
+    "sha256": "010361506857350be9b7c34e0b32f60e5aae328963a7f06f98e3f9bb00074826"
+  },
+  "ipkSize": 53872,
+  "installedSize": 185000
+}
