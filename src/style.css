@@ -171,7 +171,12 @@ select option { color: #fff; background: #1c1e27; }
 .api-key-steps li { margin: 8px 0; }
 .api-key-steps a { color: #fff; text-decoration-color: #f04455; text-underline-offset: 3px; }
 .scroll-cues { position: fixed; z-index: 9; inset: 0; overflow: hidden; pointer-events: none; }
-.scroll-cue { position: fixed; display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; background: #101116b8; color: #fff; opacity: .78; font-size: 25px; line-height: 1; text-shadow: 0 1px 5px #000; }
+.scroll-cue { position: fixed; display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; background: #101116b8; opacity: .82; }
+.scroll-cue::before { width: 9px; height: 9px; border-top: 3px solid #fff; border-right: 3px solid #fff; content: ''; }
+.scroll-cue-up::before { transform: translateY(2px) rotate(-45deg); }
+.scroll-cue-down::before { transform: translateY(-2px) rotate(135deg); }
+.scroll-cue-left::before { transform: translateX(2px) rotate(-135deg); }
+.scroll-cue-right::before { transform: translateX(-2px) rotate(45deg); }
 .category-visibility-list { max-width: 900px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 18px; }
 .category-visibility-item { display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 8px 14px; border-radius: 8px; background: #1c1e27; }
 .category-visibility-item:focus-within { outline: 3px solid #bd3544; outline-offset: 2px; background: #292c36; }

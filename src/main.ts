@@ -142,7 +142,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.6.3';
+const APP_VERSION = '0.6.4';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -503,17 +503,17 @@ function updateScrollCues(): void {
       scrollCueSets.delete(element);
     }
   }
-  const makeCue = (symbol: string): HTMLSpanElement => {
+  const makeCue = (direction: 'up' | 'down' | 'left' | 'right'): HTMLSpanElement => {
     const cue = document.createElement('span');
-    cue.className = 'scroll-cue';
-    cue.textContent = symbol;
+    cue.className = `scroll-cue scroll-cue-${direction}`;
+    cue.setAttribute('aria-hidden', 'true');
     scrollCueLayer.appendChild(cue);
     return cue;
   };
   for (const element of scrollTargets) {
     let cues = scrollCueSets.get(element);
     if (!cues) {
-      cues = { element, up: makeCue('⌃'), down: makeCue('⌄'), left: makeCue('‹'), right: makeCue('›') };
+      cues = { element, up: makeCue('up'), down: makeCue('down'), left: makeCue('left'), right: makeCue('right') };
       scrollCueSets.set(element, cues);
     }
     const rect = element.getBoundingClientRect();
