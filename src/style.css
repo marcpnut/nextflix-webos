@@ -138,7 +138,9 @@ select option { color: #fff; background: var(--surface); }
 .library-actions > .language-filter { flex: 0 0 140px; min-width: 0; margin: 0; }
 .library-actions > .language-filter label { width: 100%; gap: 7px; font-size: 14px; }
 .library-actions > .language-filter .dropdown-trigger { padding-right: 36px; padding-left: 12px; }
-.filter-label { flex: 0 1 190px; min-width: 0; }
+.filter-label { flex: 0 0 230px; min-width: 0; }
+.filter-label .dropdown-control, .filter-label .dropdown-options { width: 100%; min-width: 100%; max-width: none; }
+.filter-label .dropdown-option { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search-label { flex: 0 1 220px; width: 220px; max-width: 220px; min-width: 0; }
 .quiet { background: transparent; }
 .channel-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 26px; }
@@ -296,7 +298,7 @@ select option { color: #fff; background: var(--surface); }
   .format-label { min-width: 0; }
   .library-heading { gap: 16px; }
   .library-actions { flex-wrap: nowrap; gap: 10px; }
-  .filter-label { min-width: 0; flex: 1 1 140px; }
+  .filter-label { min-width: 0; flex: 1 1 190px; }
   .search-label { flex: 0 1 200px; width: 200px; max-width: 200px; }
   .library-actions > .language-filter { flex-basis: 128px; }
   .sidebar { width: 188px; flex-basis: 188px; }

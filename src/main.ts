@@ -177,6 +177,9 @@ let featuredItem: { kind: 'movie'; item: Movie } | { kind: 'series'; item: Serie
 let hiddenCategoryIds: Record<CatalogView, Set<string>> = { live: new Set(), movies: new Set(), series: new Set() };
 let hiddenCategoriesKey = 'nextflix.hidden-categories.v1';
 let languageFilterKey = 'nextflix.language-filter.v1';
+let categoryDropdownWidthKey = 'nextflix.category-dropdown-width.v1';
+let categoryDropdownWidth = 0;
+let categoryDropdownWidthReady = false;
 let activeLanguageFilters: Record<CatalogView, string> = { live: 'all', movies: 'all', series: 'all' };
 let favorites = new Set<string>();
 type ViewerProfile = { id: string; name: string };
@@ -600,7 +603,7 @@ function syncAllDropdowns(): void {
   dropdownControls.forEach(syncDropdown);
 }
 
-function closeDropdownSelection(commit: boolean): void {
+function closeDropdownSelection(commit: boolean, restoreFocus = true): void {
   if (!activeDropdown) return;
   const control = activeDropdown;
   if (!commit) control.select.value = control.originalValue;
@@ -608,7 +611,7 @@ function closeDropdownSelection(commit: boolean): void {
   control.list.classList.add('hidden');
   control.trigger.setAttribute('aria-expanded', 'false');
   syncDropdown(control);
-  control.trigger.focus();
+  if (restoreFocus) control.trigger.focus();
 }
 
 function commitDropdownValue(control: DropdownControl, value: string): void {
@@ -662,6 +665,15 @@ function setupDropdowns(): void {
     list.setAttribute('role', 'listbox');
     const control: DropdownControl = { select, wrapper, trigger, list, originalValue: select.value };
     dropdownControls.set(select, control);
+    wrapper.addEventListener('focusout', (event: FocusEvent) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && wrapper.contains(next)) return;
+      window.setTimeout(() => {
+        if (activeDropdown === control && !wrapper.contains(document.activeElement)) {
+          closeDropdownSelection(false, false);
+        }
+      }, 0);
+    });
     wrapper.appendChild(trigger);
     wrapper.appendChild(list);
     select.parentElement?.insertBefore(wrapper, select);
@@ -679,6 +691,13 @@ function setupDropdowns(): void {
 function focusDropdownTrigger(select: HTMLSelectElement): void {
   dropdownControls.get(select)?.trigger.focus();
 }
+
+document.addEventListener('click', (event) => {
+  const target = event.target;
+  if (activeDropdown && target instanceof Node && !activeDropdown.wrapper.contains(target)) {
+    closeDropdownSelection(false, false);
+  }
+});
 
 function updateInputProxy(input: HTMLInputElement): void {
   const proxy = inputProxies.get(input);
@@ -761,6 +780,33 @@ function categoryLanguageTag(categoryName: string | undefined): string {
   return tagSegment.trim();
 }
 
+function displayCatalogName(value: string): string {
+  // IPTV providers commonly prefix labels with "NL |" or "|NL|". Preserve
+  // their original values for matching/playback and clean only displayed text.
+  return value.replace(/^\s*(?:(?:\|\s*)?(?:[A-Z]{2}|MULTI)\s*\|\s*)+/i, '').trim() || value;
+}
+
+function syncCategoryDropdownWidth(): void {
+  const field = categorySelect.closest('.filter-label') as HTMLElement | null;
+  if (!field) return;
+  if (!categoryDropdownWidth && categoryDropdownWidthReady) {
+    const names = [...categories, ...movieCategories, ...seriesCategories]
+      .map((category) => displayCatalogName(category.category_name ?? ''))
+      .filter(Boolean);
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    const font = getComputedStyle(dropdownControls.get(categorySelect)?.trigger ?? field).font;
+    if (context) context.font = font;
+    const widestText = names.reduce((widest, name) => Math.max(widest, context?.measureText(name).width ?? name.length * 10), 0);
+    // Include side padding, border, and the dropdown arrow affordance.
+    categoryDropdownWidth = Math.max(230, Math.ceil(widestText + 70));
+    try { localStorage.setItem(categoryDropdownWidthKey, String(categoryDropdownWidth)); } catch { /* Keep the measured width for this session. */ }
+  }
+  const width = categoryDropdownWidth || 230;
+  field.style.width = `${width}px`;
+  field.style.flex = `0 0 ${width}px`;
+}
+
 function languagesForView(view: CatalogView): string[] {
   const found = new Map<string, string>();
   for (const category of categoriesFor(view)) {
@@ -832,6 +878,13 @@ function saveHiddenCategories(): void {
 function loadHiddenCategories(key: string): void {
   hiddenCategoriesKey = `nextflix.hidden-categories.${m3uCatalogKey(key)}`;
   languageFilterKey = `nextflix.language-filter.${m3uCatalogKey(key)}`;
+  categoryDropdownWidthKey = `nextflix.category-dropdown-width.${m3uCatalogKey(key)}`;
+  categoryDropdownWidth = 0;
+  categoryDropdownWidthReady = false;
+  try {
+    const savedWidth = Number(localStorage.getItem(categoryDropdownWidthKey));
+    if (Number.isFinite(savedWidth) && savedWidth >= 230) categoryDropdownWidth = savedWidth;
+  } catch { /* Re-measure and retain the width for this session. */ }
   try {
     const saved = JSON.parse(localStorage.getItem(hiddenCategoriesKey) ?? '{}') as Partial<Record<CatalogView, unknown>>;
     for (const view of ['live', 'movies', 'series'] as CatalogView[]) {
@@ -1482,12 +1535,6 @@ function showTrackMenu(): void {
   if (!tracks.length) void findOnlineSubtitles();
 }
 
-trackMenu.addEventListener('focusout', (event: FocusEvent) => {
-  const next = event.relatedTarget;
-  if (next instanceof Node && trackMenu.contains(next)) return;
-  if (openTrackMenu) closeTrackMenu(false);
-});
-
 function stopEpisodeCountdown(): void {
   if (episodeCountdownTimer) window.clearInterval(episodeCountdownTimer);
   episodeCountdownTimer = 0;
@@ -1616,8 +1663,8 @@ function renderContinueWatching(): void {
     const fullTitle = entry.seriesTitle
       ? `${entry.seriesTitle} · S${entry.season ?? '?'} E${entry.episodeNumber ?? '?'}`
       : entry.title;
-    title.textContent = truncateCardTitle(fullTitle, 24);
-    title.title = fullTitle;
+    title.textContent = truncateCardTitle(displayCatalogName(fullTitle), 24);
+    title.title = displayCatalogName(fullTitle);
     const meta = document.createElement('span');
     meta.className = 'continue-tile-meta';
     meta.textContent = `Continue · ${playbackTime(entry.position)}`;
@@ -1691,7 +1738,7 @@ function showMovieDetails(item: Movie): void {
   }
   detailItem = { kind: 'movie', item };
   detailKind.textContent = 'MOVIE';
-  detailTitle.textContent = item.name ?? 'Untitled movie';
+  detailTitle.textContent = displayCatalogName(item.name ?? 'Untitled movie');
   detailMeta.textContent = [item.year, item.rating ? `★ ${item.rating}` : ''].filter(Boolean).join(' · ');
   detailDescription.textContent = item.plot ?? 'No description supplied by the provider.';
   detailCast.textContent = '';
@@ -1714,7 +1761,7 @@ function showSeriesDetails(item: Series): void {
   }
   detailItem = { kind: 'series', item };
   detailKind.textContent = 'SERIES';
-  detailTitle.textContent = item.name ?? 'Untitled series';
+  detailTitle.textContent = displayCatalogName(item.name ?? 'Untitled series');
   detailMeta.textContent = [item.releaseDate, item.genre, item.rating ? `★ ${item.rating}` : ''].filter(Boolean).join(' · ');
   detailDescription.textContent = item.plot ?? 'No description supplied by the provider.';
   detailCast.textContent = '';
@@ -1749,8 +1796,8 @@ function renderPosterRow(container: HTMLElement, kind: 'movie' | 'series', items
       button.appendChild(image);
     }
     const label = document.createElement('span');
-    label.textContent = truncateCardTitle(title, 22);
-    label.title = title;
+    label.textContent = truncateCardTitle(displayCatalogName(title), 22);
+    label.title = displayCatalogName(title);
     button.appendChild(label);
     button.addEventListener('click', () => kind === 'movie' ? showMovieDetails(item as Movie) : showSeriesDetails(item as Series));
     container.appendChild(button);
@@ -1869,8 +1916,8 @@ function renderTmdbHomeRows(): void {
         card.appendChild(image);
       }
       const title = document.createElement('span');
-      title.textContent = truncateCardTitle(item.name ?? entry.title, 22);
-      title.title = item.name ?? entry.title;
+      title.textContent = truncateCardTitle(displayCatalogName(item.name ?? entry.title), 22);
+      title.title = displayCatalogName(item.name ?? entry.title);
       card.appendChild(title);
       card.addEventListener('click', () => playlist.kind === 'movie' ? showMovieDetails(item as Movie) : showSeriesDetails(item as Series));
       list.appendChild(card);
@@ -1972,8 +2019,8 @@ function renderRecommendations(): void {
       button.appendChild(image);
     }
     const label = document.createElement('span');
-    label.textContent = truncateCardTitle(title, 22);
-    label.title = title;
+    label.textContent = truncateCardTitle(displayCatalogName(title), 22);
+    label.title = displayCatalogName(title);
     button.appendChild(label);
     button.addEventListener('click', () => pick.kind === 'movie'
       ? showMovieDetails(pick.item as Movie)
@@ -1988,7 +2035,7 @@ function renderHome(): void {
   featuredItem = firstMovie ? { kind: 'movie', item: firstMovie } : firstSeries ? { kind: 'series', item: firstSeries } : null;
   if (featuredItem) {
     const item = featuredItem.item;
-    heroTitle.textContent = item.name ?? 'Featured title';
+    heroTitle.textContent = displayCatalogName(item.name ?? 'Featured title');
     heroDescription.textContent = item.plot ?? (featuredItem.kind === 'movie' ? 'Featured from your movie catalog.' : 'Featured from your series catalog.');
     const poster = featuredItem.kind === 'movie' ? (item as Movie).stream_icon : (item as Series).cover;
     if (poster) {
@@ -2039,8 +2086,8 @@ function renderMyList(): void {
     }
     const label = document.createElement('span');
     label.className = 'media-card-title';
-    label.textContent = truncateCardTitle(title, 30);
-    label.title = title;
+    label.textContent = truncateCardTitle(displayCatalogName(title), 30);
+    label.title = displayCatalogName(title);
     button.appendChild(label);
     button.addEventListener('click', () => movie ? showMovieDetails(movie) : showSeriesDetails(show!));
     myListItems.appendChild(button);
@@ -2075,7 +2122,7 @@ function renderCategorySettings(): void {
       renderHome();
     });
     const name = document.createElement('span');
-    name.textContent = category.category_name;
+    name.textContent = displayCatalogName(category.category_name);
     label.appendChild(checkbox);
     label.appendChild(name);
     categoryVisibilityList.appendChild(label);
@@ -2120,6 +2167,7 @@ function showPage(page: AppPage): void {
 function updateCatalogHeading(): void {
   placeLanguageFilter();
   renderLanguageFilter();
+  syncCategoryDropdownWidth();
   catalogTitle.textContent = activeSeries
     ? `${activeSeries.name ?? 'Series'} · Episodes`
     : catalogView === 'movies' ? 'Movies' : catalogView === 'series' ? 'Series' : 'Live TV';
@@ -2128,7 +2176,7 @@ function updateCatalogHeading(): void {
   categorySelect.appendChild(new Option('All categories', 'all'));
   for (const category of categoriesForView()) {
     if (category.category_id === undefined || !category.category_name || !isCategoryVisible(catalogView, category.category_id)) continue;
-    categorySelect.appendChild(new Option(category.category_name, String(category.category_id)));
+    categorySelect.appendChild(new Option(displayCatalogName(category.category_name), String(category.category_id)));
   }
   const categoryControl = dropdownControls.get(categorySelect);
   if (categoryControl) syncDropdown(categoryControl);
@@ -2225,6 +2273,7 @@ async function loadMoviesAndSeries(key: string, generation: number): Promise<voi
   else warnings.push('movie categories unavailable');
   if (seriesCategoryResult.status === 'fulfilled' && Array.isArray(seriesCategoryResult.value)) seriesCategories = seriesCategoryResult.value;
   else warnings.push('series categories unavailable');
+  categoryDropdownWidthReady = true;
   if (currentPage === 'movies' || currentPage === 'series') updateCatalogHeading();
   if (!credentials || generation !== providerLoadGeneration) return;
   const [movieResult, seriesResult] = await Promise.all([
@@ -2289,6 +2338,8 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       movies = Array.isArray(cache.movies) ? cache.movies : [];
       seriesCategories = Array.isArray(cache.seriesCategories) ? cache.seriesCategories : [];
       series = Array.isArray(cache.series) ? cache.series : [];
+      categoryDropdownWidthReady = cache.sourceType === 'm3u'
+        || (Array.isArray(cache.movieCategories) && Array.isArray(cache.seriesCategories));
       sourceType = cache.sourceType === 'm3u' ? 'm3u' : sourceType;
       playbackBase = cache.playbackBase ?? base;
       allowedLiveFormats = Array.isArray(cache.allowedFormats) ? cache.allowedFormats : [];
@@ -2325,6 +2376,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       if (!parsed.channels.length) throw new Error('The M3U file contains no valid channel entries.');
       categories = parsed.categories;
       channels = parsed.channels;
+      categoryDropdownWidthReady = true;
         movieCategories = [];
       movies = [];
       seriesCategories = [];
@@ -2466,7 +2518,7 @@ function renderChannels(append = false): void {
       number.textContent = item.meta ?? '•';
       const name = document.createElement('span');
       name.className = 'channel-name';
-      name.textContent = item.title;
+      name.textContent = displayCatalogName(item.title);
       const labelGroup = document.createElement('span');
       labelGroup.className = 'channel-label-group';
       labelGroup.appendChild(name);
@@ -2485,8 +2537,8 @@ function renderChannels(append = false): void {
       }
       const title = document.createElement('span');
       title.className = 'media-card-title';
-      title.textContent = truncateCardTitle(item.title, 30);
-      title.title = item.title;
+      title.textContent = truncateCardTitle(displayCatalogName(item.title), 30);
+      title.title = displayCatalogName(item.title);
       button.appendChild(title);
       if (item.meta) {
         const meta = document.createElement('span');
@@ -2574,15 +2626,9 @@ function clearStreamFallbackState(): void {
 
 function showLiveChannelFullscreen(): void {
   if (!selectedChannel) return;
-  const streamFailed = livePreview.classList.contains('stream-failed');
-  livePreview.classList.remove('stream-failed');
-  playerLayer.classList.toggle('stream-failed', streamFailed);
-  moveVideoToPlayer();
-  livePreview.classList.add('hidden');
-  playerLayer.classList.remove('hidden');
-  returnToLivePreviewOnPlayerClose = currentPage === 'live' && catalogView === 'live' && !activeSeries;
-  revealPlayerControls(false);
-  playPauseButton.focus();
+  // Rebuild playback in the full-screen container. Reparenting a playing video
+  // can stop its media pipeline on webOS, so do not move the preview element.
+  void playChannel(selectedChannel, 'fullscreen');
 }
 
 function selectLiveChannel(channel: Channel): void {
@@ -2689,9 +2735,9 @@ async function startPlayback(
     ? series.find((item) => String(item.series_id) === resume.entry.seriesId)?.cover : undefined;
   const detailArtwork = !detailView.classList.contains('hidden') && !detailPoster.classList.contains('hidden') ? detailPoster.src : undefined;
   setFallbackArtwork(channel?.stream_icon || resume?.entry.poster || seriesArtwork || detailArtwork);
-  playingTitle.textContent = title;
+  playingTitle.textContent = displayCatalogName(title);
   playerMessage.textContent = 'Connecting to stream…';
-  livePreviewTitle.textContent = title;
+  livePreviewTitle.textContent = displayCatalogName(title);
   livePreviewMessage.textContent = display === 'preview' ? 'Connecting to channel…' : '';
   if (display === 'preview' && channel) {
     livePreview.appendChild(video);
@@ -2819,7 +2865,7 @@ function closePlayer(stopPlayback = false): void {
   currentVodEntry = null;
   seekRow.classList.add('hidden');
   if (returnToPreview && selectedChannel) {
-    livePreviewTitle.textContent = selectedChannel.name ?? 'Live TV';
+    livePreviewTitle.textContent = displayCatalogName(selectedChannel.name ?? 'Live TV');
     livePreviewMessage.textContent = '';
     livePreview.appendChild(video);
     livePreview.classList.remove('hidden');
@@ -3025,11 +3071,19 @@ function focusAdjacentLibraryAction(active: HTMLElement, keyCode: number): boole
   return true;
 }
 
-function focusActiveSidebarItem(): boolean {
-  const activeNav = sidebar.querySelector<HTMLButtonElement>('.nav-button.active')
-    ?? sidebar.querySelector<HTMLButtonElement>('.nav-button');
-  if (!activeNav || !elementIsVisible(activeNav)) return false;
-  activeNav.focus();
+function focusClosestSidebarItem(from: HTMLElement): boolean {
+  const origin = from.getBoundingClientRect();
+  const x = origin.left + origin.width / 2;
+  const y = origin.top + origin.height / 2;
+  const items = Array.from(sidebar.querySelectorAll<HTMLButtonElement>('.nav-button')).filter(elementIsVisible);
+  items.sort((left, right) => {
+    const a = left.getBoundingClientRect();
+    const b = right.getBoundingClientRect();
+    return Math.hypot(a.left + a.width / 2 - x, a.top + a.height / 2 - y)
+      - Math.hypot(b.left + b.width / 2 - x, b.top + b.height / 2 - y);
+  });
+  if (!items[0]) return false;
+  items[0].focus();
   return true;
 }
 
@@ -3046,7 +3100,7 @@ function focusBestGeometricCandidate(active: HTMLElement, keyCode: number): bool
         // the sidebar as a geometric candidate.
         : currentPage === 'settings' && !sidebar.contains(active) ? appContent : appLayout;
   const candidates = Array.from(scope.querySelectorAll<HTMLElement>('button, input, select, a[href]'))
-    .filter((candidate) => candidate !== active && elementIsVisible(candidate));
+    .filter((candidate) => candidate !== active && candidate !== profileSwitchButton && elementIsVisible(candidate));
   let best: HTMLElement | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
   for (const candidate of candidates) {
@@ -3067,13 +3121,22 @@ function focusBestGeometricCandidate(active: HTMLElement, keyCode: number): bool
 function moveDirectionalFocus(keyCode: number): boolean {
   const active = document.activeElement as HTMLElement | null;
   if (!active || editingInput === active || active.isContentEditable || active.tagName === 'TEXTAREA') return false;
+  const settingsNav = sidebar.querySelector<HTMLButtonElement>('.nav-button[data-page="settings"]');
+  if (active === settingsNav && keyCode === 40) {
+    profileSwitchButton.focus();
+    return true;
+  }
+  if (active === profileSwitchButton) {
+    if (keyCode === 38) { settingsNav?.focus(); return !!settingsNav; }
+    return true;
+  }
   const rows = visibleContentRows();
   const rowIndex = rows.findIndex((row) => row.includes(active as HTMLButtonElement));
   if (rowIndex >= 0) {
     const row = rows[rowIndex];
     const itemIndex = row.indexOf(active as HTMLButtonElement);
     if (keyCode === 37) {
-      if (itemIndex === 0) return focusActiveSidebarItem();
+      if (itemIndex === 0) return focusClosestSidebarItem(active);
       row[itemIndex - 1].focus();
       return true;
     }
@@ -3135,10 +3198,11 @@ function moveDirectionalFocus(keyCode: number): boolean {
   if (active.classList.contains('nav-button') && keyCode === 39) return focusFirstContentItem();
   if (active.classList.contains('sidebar-toggle') && keyCode === 39) return focusFirstContentItem();
   if ((keyCode === 37 || keyCode === 39) && libraryActionTargets().includes(active)) {
-    return focusAdjacentLibraryAction(active, keyCode) || (keyCode === 37 && focusActiveSidebarItem());
+    return focusAdjacentLibraryAction(active, keyCode) || (keyCode === 37 && focusClosestSidebarItem(active));
   }
   if (active.classList.contains('dropdown-trigger') && activeDropdown) return false;
-  return focusBestGeometricCandidate(active, keyCode);
+  return focusBestGeometricCandidate(active, keyCode)
+    || (keyCode === 37 && !sidebar.contains(active) ? focusClosestSidebarItem(active) : false);
 }
 
 function disconnect(): void {
@@ -3326,7 +3390,11 @@ nextChannelButton.addEventListener('click', () => switchChannel(1));
 seekBackButton.addEventListener('click', () => seekBy(-10));
 seekForwardButton.addEventListener('click', () => seekBy(10));
 subtitleTracksButton.addEventListener('click', showTrackMenu);
-playerLayer.addEventListener('click', () => revealPlayerControls(false));
+playerLayer.addEventListener('click', (event) => {
+  const target = event.target;
+  if (openTrackMenu && target instanceof Node && !trackMenu.contains(target) && target !== subtitleTracksButton) closeTrackMenu(false);
+  revealPlayerControls(false);
+});
 playerLayer.addEventListener('mousemove', () => revealPlayerControls(false));
 nextEpisodePlayButton.addEventListener('click', () => {
   const episode = nextEpisode;
@@ -3467,7 +3535,7 @@ window.addEventListener('keydown', (event) => {
       event.stopPropagation();
       if (keyCode === 39) focusDropdownTrigger(categorySelect);
       else if (!languageFilter.classList.contains('hidden')) focusDropdownTrigger(languageSelect);
-      else focusActiveSidebarItem();
+      else focusClosestSidebarItem(searchProxy);
       return;
     }
     event.preventDefault();

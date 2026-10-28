@@ -1,0 +1,16 @@
+{
+  "id": "com.nextflix.iptv",
+  "version": "1.0.1",
+  "type": "web",
+  "title": "NextFlix",
+  "appDescription": "A lightweight IPTV player with persistent category sizing, improved TV navigation, and playback fixes.",
+  "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/largeIcon.png",
+  "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
+  "rootRequired": false,
+  "ipkUrl": "https://github.com/marcpnut/nextflix-webos/releases/download/v1.0.1/com.nextflix.iptv_1.0.1_all.ipk",
+  "ipkHash": {
+    "sha256": "f4cb838e362768a7408c6d39d733af77ee11e15a4fa164ced8ec770e59185c3a"
+  },
+  "ipkSize": 61048,
+  "installedSize": 183479
+}
