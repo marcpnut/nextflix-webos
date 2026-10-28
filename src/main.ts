@@ -157,7 +157,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.10';
+const APP_VERSION = '1.0.11';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -935,7 +935,16 @@ function beginInputEditing(input: HTMLInputElement): void {
   input.readOnly = false;
   input.tabIndex = 0;
   proxy.hidden = true;
-  input.focus();
+  // Older webOS WebKit may ignore focus() in the same task that unhides an
+  // input. Defer focus so the native text editor attaches to the real field.
+  window.setTimeout(() => {
+    if (editingInput !== input || input.hidden) return;
+    input.focus();
+    try {
+      const end = input.value.length;
+      input.setSelectionRange(end, end);
+    } catch { /* Keep focus even when a platform input does not expose selection. */ }
+  }, 0);
 }
 
 function emitInputChanged(input: HTMLInputElement): void {
@@ -999,6 +1008,9 @@ function setupInputProxies(): void {
       input.required = false;
       inputProxies.set(input, proxy);
       updateInputProxy(input);
+      input.addEventListener('focus', () => {
+        if (!input.hidden && !input.readOnly) editingInput = input;
+      });
       input.addEventListener('input', () => updateInputProxy(input));
       input.addEventListener('change', () => updateInputProxy(input));
       proxy.addEventListener('click', () => beginInputEditing(input));
