@@ -1,0 +1,10 @@
+{
+  "id": "com.nextflix.iptv.network",
+  "description": "Private NextFlix provider networking service",
+  "services": [
+    {
+      "name": "com.nextflix.iptv.network",
+      "description": "Performs provider HTTP requests for NextFlix"
+    }
+  ]
+}

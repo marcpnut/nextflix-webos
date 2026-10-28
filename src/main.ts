@@ -156,7 +156,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.7';
+const APP_VERSION = '1.0.8';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -452,26 +452,134 @@ async function describe511(response: Response, requestBase: string): Promise<str
   return `HTTP 511 diagnostic · App ${diagnostic.appVersion} · Browser ${diagnostic.browserUserAgent} · Request host ${diagnostic.requestHost} · Response host ${diagnostic.responseHost} · Redirected ${diagnostic.redirected ? 'yes' : 'no'} · Content-Type ${headers['content-type'] ?? 'unavailable'} · Server ${headers.server ?? 'unavailable'} · Via ${headers.via ?? 'unavailable'} · Response: ${body || '[empty]'}`;
 }
 
+type XtreamServiceReply = {
+  returnValue?: boolean;
+  errorText?: string;
+  statusCode?: number;
+  contentType?: string;
+  server?: string;
+  responseOrigin?: string;
+  body?: string;
+  chunked?: boolean;
+  requestId?: string;
+  bodyLength?: number;
+  chunkSize?: number;
+  chunk?: string;
+};
+
+type XtreamLunaRequest = {
+  method: string;
+  parameters: Record<string, unknown>;
+  onSuccess: (response: XtreamServiceReply) => void;
+  onFailure: (error: { errorText?: string }) => void;
+};
+
+type XtreamLunaHandle = { cancel?: () => void };
+type XtreamWebOsHost = Window & {
+  webOS?: { service?: { request: (uri: string, request: XtreamLunaRequest) => XtreamLunaHandle | undefined } };
+};
+
+function callXtreamService(method: string, parameters: Record<string, unknown>, signal: AbortSignal): Promise<XtreamServiceReply> {
+  const luna = (window as XtreamWebOsHost).webOS?.service;
+  if (!luna?.request) return Promise.reject(new Error('The TV provider network service is unavailable.'));
+  return new Promise((resolve, reject) => {
+    let handle: XtreamLunaHandle | undefined;
+    let settled = false;
+    const finish = (error?: Error, response?: XtreamServiceReply): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      if (error) reject(error);
+      else resolve(response ?? {});
+    };
+    const abort = (): void => {
+      try { handle?.cancel?.(); } catch { /* Cancellation is best effort on older webOS. */ }
+      finish(new Error('Provider request aborted.'));
+    };
+    if (signal.aborted) return abort();
+    signal.addEventListener('abort', abort);
+    try {
+      handle = luna.request('luna://com.nextflix.iptv.network', {
+        method,
+        parameters,
+        onSuccess: (response) => response.returnValue === false
+          ? finish(new Error(response.errorText || 'The TV provider network service rejected the request.'))
+          : finish(undefined, response),
+        onFailure: (error) => finish(new Error(error.errorText || 'The TV provider network service failed.'))
+      });
+      if (signal.aborted) abort();
+    } catch {
+      finish(new Error('The TV provider network service could not be called.'));
+    }
+  });
+}
+
+async function requestXtreamThroughWebOsService(
+  action: string | undefined,
+  extra: Record<string, string>,
+  timeoutMs: number,
+  signal: AbortSignal
+): Promise<XtreamServiceReply> {
+  if (!credentials) throw new Error('Connect to a provider first.');
+  const first = await callXtreamService('request', {
+    base: credentials.base,
+    username: credentials.username,
+    password: credentials.password,
+    action: action ?? '',
+    extra,
+    timeoutMs
+  }, signal);
+  if (!first.chunked) return first;
+  if (!first.requestId || !Number.isFinite(first.bodyLength) || !first.chunkSize || first.bodyLength! < 0) {
+    throw new Error('The TV returned an invalid provider response.');
+  }
+
+  const pieces: string[] = [];
+  try {
+    for (let offset = 0; offset < first.bodyLength!; offset += first.chunkSize) {
+      const part = await callXtreamService('readChunk', { requestId: first.requestId, offset }, signal);
+      if (typeof part.chunk !== 'string') throw new Error('The TV returned an incomplete provider response.');
+      pieces.push(part.chunk);
+    }
+    return { ...first, body: pieces.join(''), chunked: false };
+  } finally {
+    if (!signal.aborted) {
+      try { await callXtreamService('release', { requestId: first.requestId }, signal); } catch { /* The service expires abandoned chunks automatically. */ }
+    }
+  }
+}
+
+function describe511FromService(result: XtreamServiceReply, requestBase: string): string {
+  const body = sanitized511Body(result.body ?? '');
+  return `HTTP 511 diagnostic · App ${APP_VERSION} · Browser ${navigator.userAgent.slice(0, 200)} · Request host ${safeOrigin(requestBase)} · Response host ${safeOrigin(result.responseOrigin ?? requestBase)} · Redirected no · Content-Type ${(result.contentType ?? 'unavailable').slice(0, 160)} · Server ${(result.server ?? 'unavailable').slice(0, 160)} · Via unavailable · Response: ${body || '[empty]'}`;
+}
+
 async function api<T>(action?: string, extra: Record<string, string> = {}, timeoutMs = 60_000): Promise<T> {
   if (!credentials) throw new Error('Connect to a provider first.');
   const controller = createAbortController();
   requestControllers.add(controller);
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-  let abortHandler: (() => void) | null = null;
-  const query = new URLSearchParams({ username: credentials.username, password: credentials.password, ...extra });
-  if (action) query.set('action', action);
   try {
-    const requestUrl = `${credentials.base}/player_api.php?${query.toString()}`;
     const legacyWebOsFetch = /Chrome\/53\.0/.test(navigator.userAgent) && /WebAppManager/.test(navigator.userAgent);
-    const request = legacyWebOsFetch
-      ? fetch(requestUrl)
-      : fetch(requestUrl, { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store', signal: controller.signal });
-    const abort = new Promise<Response>((_resolve, reject) => {
-      abortHandler = () => reject(new Error('Provider request aborted.'));
-      if (controller.signal.aborted) abortHandler();
-      else controller.signal.addEventListener('abort', abortHandler);
-    });
-    const response = await Promise.race([request, abort]);
+    if (legacyWebOsFetch) {
+      const result = await requestXtreamThroughWebOsService(action, extra, timeoutMs, controller.signal);
+      const status = Number(result.statusCode) || 0;
+      if (status === 511) throw new Error(describe511FromService(result, credentials.base));
+      if (status < 200 || status >= 300) throw new Error(`Provider returned HTTP ${status || 'an unknown status'}.`);
+      try {
+        const body: unknown = JSON.parse(result.body ?? '');
+        if (body === null || typeof body !== 'object') throw new Error('Provider returned an unexpected response.');
+        return body as T;
+      } catch (error) {
+        if (error instanceof Error && error.message === 'Provider returned an unexpected response.') throw error;
+        throw new Error('Provider returned invalid JSON.');
+      }
+    }
+
+    const query = new URLSearchParams({ username: credentials.username, password: credentials.password, ...extra });
+    if (action) query.set('action', action);
+    const requestUrl = `${credentials.base}/player_api.php?${query.toString()}`;
+    const response = await fetch(requestUrl, { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store', signal: controller.signal });
     if (!response.ok) {
       if (response.status === 511) throw new Error(await describe511(response, credentials.base));
       throw new Error(`Provider returned HTTP ${response.status}.`);
@@ -485,7 +593,6 @@ async function api<T>(action?: string, extra: Record<string, string> = {}, timeo
     throw new Error('Could not reach the provider. Check the URL, network, TLS, and browser CORS support.');
   } finally {
     window.clearTimeout(timeout);
-    if (abortHandler) controller.signal.removeEventListener('abort', abortHandler);
     requestControllers.delete(controller);
   }
 }

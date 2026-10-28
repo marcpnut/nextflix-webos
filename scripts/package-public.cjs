@@ -31,7 +31,7 @@ function localTestValues() {
 
 function verifyPublicBuild() {
   const dist = path.join(root, 'dist');
-  const files = [path.join(dist, 'index.html'), path.join(dist, 'assets', 'app.js')];
+  const files = [path.join(dist, 'index.html'), path.join(dist, 'assets', 'app.js'), path.join(root, 'webos-service', 'main.js')];
   const output = files.map((file) => fs.readFileSync(file, 'utf8')).join('\n');
   const embedded = localTestValues().some((secret) => output.includes(secret));
   if (embedded) throw new Error('Build contains local test-provider values. Refusing to create a public IPK.');
@@ -43,7 +43,7 @@ function verifyPublicBuild() {
 try {
   run(['build']);
   verifyPublicBuild();
-  run(['exec', 'ares-package', 'dist', '-o', 'packages']);
+  run(['exec', 'ares-package', 'dist', 'webos-service', '-o', 'packages']);
   process.stdout.write('Public IPK created without embedded local provider settings.\n');
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : 'Public packaging failed.'}\n`);
