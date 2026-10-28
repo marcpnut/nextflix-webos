@@ -84,37 +84,23 @@
               </section>
               <div class="settings-actions"><button id="show-all-categories">Show all</button><button id="hide-all-categories">Hide all</button></div>
               <div id="category-visibility-list" class="category-visibility-list"></div>
-              <section class="epg-settings" aria-labelledby="epg-settings-title">
-                <h2 id="epg-settings-title">TV guide and XMLTV</h2>
-                <p class="muted">Use the provider’s guide by default, or enter an XMLTV URL. Guide data is cached on this TV and refreshed every 12 hours when NextFlix is running.</p>
-                <label>Custom XMLTV URL (optional)<input id="xmltv-url" type="url" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://guide.example/guide.xml" /></label>
-                <div class="epg-settings-actions"><button id="save-epg-settings">Save and refresh guide</button><span id="epg-settings-status" role="status"></span></div>
-                <div class="epg-mapping">
-                  <h3>Manual channel mapping</h3>
-                  <label>Find a live channel<input id="epg-map-channel-search" type="search" placeholder="Search provider channels" autocomplete="off" /></label>
-                  <div id="epg-map-channel-results" class="epg-map-results"></div>
-                  <label>Find an XMLTV channel<input id="epg-map-source-search" type="search" placeholder="Search guide channels" autocomplete="off" /></label>
-                  <div id="epg-map-source-results" class="epg-map-results"></div>
-                  <div class="epg-settings-actions"><button id="epg-clear-mapping" class="quiet" disabled>Clear selected mapping</button><span id="epg-mapping-status" role="status">Select a live channel and an XMLTV channel to map them.</span></div>
-                </div>
-              </section>
               <section class="maintenance-settings" aria-labelledby="backup-settings-title">
                 <h2 id="backup-settings-title">Backup and restore</h2>
-                <p class="muted">Export your NextFlix settings in an encrypted file. The file includes saved provider credentials, profiles, favorites, category visibility, guide mappings, and watch history. Keep the password safe; it cannot be recovered.</p>
+                <p class="muted">Export your NextFlix settings in an encrypted file. The file includes saved provider credentials, profiles, favorites, category visibility, and watch history. Keep the password safe; it cannot be recovered.</p>
                 <label>Backup password<input id="backup-password" type="password" minlength="8" autocomplete="new-password" placeholder="At least 8 characters" /></label>
                 <div class="settings-actions">
                   <button id="export-backup" class="primary">Export encrypted backup</button>
                   <button id="choose-backup">Choose backup to restore</button>
                   <input id="backup-file" type="file" accept=".nextflix,.json,application/json" hidden />
                 </div>
-                <p id="backup-status" class="maintenance-status" role="status" aria-live="polite">Backups exclude cached artwork and rebuildable catalog/guide data.</p>
+                <p id="backup-status" class="maintenance-status" role="status" aria-live="polite">Backups exclude cached artwork and rebuildable catalog data.</p>
               </section>
               <section class="maintenance-settings" aria-labelledby="diagnostics-title">
                 <h2 id="diagnostics-title">Diagnostics and cache</h2>
                 <p id="diagnostics-summary" class="maintenance-status" role="status">Select Refresh diagnostics to inspect this app’s local capabilities and cache.</p>
                 <div class="settings-actions">
                   <button id="refresh-diagnostics">Refresh diagnostics</button>
-                  <button id="clear-cache" class="quiet">Clear cached catalog and guide data</button>
+                  <button id="clear-cache" class="quiet">Clear cached catalog data</button>
                   <button id="check-updates">Check for app updates</button>
                 </div>
                 <p id="cache-status" class="maintenance-status" role="status" aria-live="polite"></p>
@@ -123,11 +109,16 @@
               </section>
               <section class="maintenance-settings" aria-labelledby="metadata-settings-title">
                 <h2 id="metadata-settings-title">Movie information and subtitles</h2>
-                <p class="muted">Optional keys are stored on this TV. TMDB adds descriptions when a title matches confidently. OpenSubtitles.com can search for external subtitles when a movie or episode has no selectable subtitles.</p>
-                <label>TMDB API Read Access Token<input id="tmdb-token" type="password" autocomplete="off" placeholder="Paste your TMDB read token" /></label>
+                <p class="muted">These optional API keys are saved in this TV’s browser storage, unencrypted. Treat them like passwords. NextFlix sends them directly to their respective services; they are not sent to NextFlix servers. OMDb can add movie and series details when a title matches exactly; OpenSubtitles.com can find external subtitles when the stream has none.</p>
+                <ol class="api-key-steps">
+                  <li><a href="https://www.omdbapi.com/apikey.aspx" target="_blank" rel="noopener noreferrer">OMDb API key page</a>: choose the free option, request a key, and use the key sent to your email. The free tier allows 1,000 requests per day. OMDb lists its poster API as patron-only; NextFlix keeps the provider poster when OMDb has no usable poster.</li>
+                  <li><a href="https://www.opensubtitles.com/consumers" target="_blank" rel="noopener noreferrer">OpenSubtitles API consumers</a>: sign in, register an application, and copy its API key. A website account password is not an API key.</li>
+                  <li>Enter each value below and choose <strong>Save API keys</strong>. Leave either field blank if you do not want that service.</li>
+                </ol>
+                <label>OMDb API key<input id="omdb-api-key" type="password" autocomplete="off" placeholder="Paste your OMDb API key" /></label>
                 <label>OpenSubtitles.com API key<input id="opensubtitles-key" type="password" autocomplete="off" placeholder="Paste your OpenSubtitles API key" /></label>
                 <div class="settings-actions"><button id="save-metadata-keys">Save API keys</button><span id="metadata-settings-status" role="status"></span></div>
-                <p class="maintenance-status">This product uses the TMDB API but is not endorsed or certified by TMDB. <a href="https://www.themoviedb.org" target="_blank" rel="noopener noreferrer">The Movie Database</a> supplies optional metadata.</p>
+                <p class="maintenance-status">Metadata from the <a href="https://www.omdbapi.com/" target="_blank" rel="noopener noreferrer">OMDb API</a> is licensed under <a href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener noreferrer">CC BY-NC 4.0</a>. NextFlix is not endorsed by or affiliated with IMDb.</p>
               </section>
               <section class="settings-account"><h2>Provider</h2><button id="disconnect-button" class="quiet">Disconnect</button></section>
             </section>
@@ -146,7 +137,6 @@
             <div class="library-actions">
               <label class="search-label">Search<input id="catalog-search" type="search" placeholder="Search titles" autocomplete="off" /></label>
               <label class="filter-label">Category<select id="category"><option value="all">All categories</option></select></label>
-              <button id="open-guide" class="quiet hidden">TV Guide</button>
               <button id="back-to-series" class="quiet hidden">Back to series</button>
             </div>
           </div>
@@ -188,18 +178,6 @@
 
       <section id="player" class="player hidden" aria-label="Video player">
         <video id="video" playsinline></video>
-        <section id="epg-guide" class="epg-guide hidden" aria-label="Live TV guide">
-          <header class="epg-guide-header">
-            <div><div class="eyebrow">LIVE TV</div><h1>TV Guide</h1><p id="epg-guide-status" role="status" aria-live="polite">Loading guide…</p></div>
-            <div class="epg-preview-box"><div class="epg-preview-video" id="epg-preview-video"></div><div class="epg-preview-label"><span>Now playing</span><strong id="epg-preview-title"></strong></div></div>
-            <button id="close-guide" class="player-icon-button player-back" aria-label="Close guide" title="Close guide"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></button>
-          </header>
-          <div id="epg-grid-scroll" class="epg-grid-scroll"><div id="epg-grid" class="epg-grid"></div></div>
-          <section id="epg-program-detail" class="epg-program-detail hidden" aria-label="Program information">
-            <div><strong id="epg-detail-title"></strong><span id="epg-detail-time"></span><p id="epg-detail-description"></p></div>
-            <div class="epg-detail-actions"><button id="epg-watch-live" class="primary">Watch live</button><button id="epg-replay" class="quiet hidden">Replay</button></div>
-          </section>
-        </section>
         <div class="player-top">
           <button id="close-player" class="player-icon-button player-back" aria-label="Back" title="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></button>
           <div id="playing-title"></div>
@@ -210,7 +188,6 @@
           <div class="player-controls" aria-label="Playback controls">
             <button id="seek-back" class="player-icon-button hidden" aria-label="Rewind 10 seconds" title="Rewind 10 seconds"><svg class="skip-icon" viewBox="0 0 40 40" aria-hidden="true"><path d="M11 11V4m0 7h7M11.5 10.5A13 13 0 1 1 9 20" /><text x="13" y="23">10</text></svg></button>
             <button id="previous-channel" class="player-icon-button" aria-label="Previous channel" title="Previous channel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M19 6l-9 6 9 6z" /></svg></button>
-            <button id="player-guide" class="player-icon-button hidden" aria-label="TV Guide" title="TV Guide"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M8 9h3m2 0h3M8 13h3m2 0h3" /></svg></button>
             <button id="play-pause" class="player-icon-button play-toggle" aria-label="Pause" title="Pause"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg></button>
             <button id="next-channel" class="player-icon-button" aria-label="Next channel" title="Next channel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M5 6l9 6-9 6z" /></svg></button>
             <button id="seek-forward" class="player-icon-button hidden" aria-label="Forward 10 seconds" title="Forward 10 seconds"><svg class="skip-icon" viewBox="0 0 40 40" aria-hidden="true"><path d="M29 11V4m0 7h-7m6.5-.5A13 13 0 1 0 31 20" /><text x="13" y="23">10</text></svg></button>
@@ -228,6 +205,7 @@
         </div>
       </section>
     </div>
+    <div id="scroll-cues" class="scroll-cues" aria-hidden="true"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -6,7 +6,6 @@ export type CatalogChannel = {
   stream_url?: string;
   stream_icon?: string;
   category_id?: string | number;
-  epg_channel_id?: string;
   tv_archive?: boolean | number | string;
   tv_archive_duration?: number | string;
 };
@@ -58,12 +57,10 @@ export type CachedCatalog = {
   liveFormat?: string;
 };
 
-export type CachedEpg = { key: string; sourceHash: string; savedAt: number; channels: unknown[]; programs: unknown[] };
-
 const DATABASE = 'nextflix-catalog-cache';
 const STORE = 'catalogs';
-const EPG_STORE = 'epg';
-const DATABASE_VERSION = 2;
+const LEGACY_EPG_STORE = 'epg';
+const DATABASE_VERSION = 3;
 const CACHE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 
 async function pruneStore(database: IDBDatabase, storeName: string, keepNewest: number): Promise<void> {
@@ -96,7 +93,6 @@ export async function pruneRebuildableCaches(): Promise<void> {
   const database = await openDatabase();
   try {
     await pruneStore(database, STORE, 2);
-    await pruneStore(database, EPG_STORE, 2);
   } finally {
     database.close();
   }
@@ -112,40 +108,12 @@ function openDatabase(): Promise<IDBDatabase> {
     request.onupgradeneeded = () => {
       const database = request.result;
       if (!database.objectStoreNames.contains(STORE)) database.createObjectStore(STORE, { keyPath: 'key' });
-      if (!database.objectStoreNames.contains(EPG_STORE)) database.createObjectStore(EPG_STORE, { keyPath: 'key' });
+      if (database.objectStoreNames.contains(LEGACY_EPG_STORE)) database.deleteObjectStore(LEGACY_EPG_STORE);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error('Could not open catalog storage.'));
     request.onblocked = () => reject(new Error('Catalog storage is busy.'));
   });
-}
-
-export async function readEpgSnapshot(key: string): Promise<CachedEpg | null> {
-  const database = await openDatabase();
-  try {
-    return await new Promise((resolve, reject) => {
-      const request = database.transaction(EPG_STORE, 'readonly').objectStore(EPG_STORE).get(key);
-      request.onsuccess = () => resolve((request.result as CachedEpg | undefined) ?? null);
-      request.onerror = () => reject(request.error ?? new Error('Could not read the saved TV guide.'));
-    });
-  } finally {
-    database.close();
-  }
-}
-
-export async function writeEpgSnapshot(snapshot: CachedEpg): Promise<void> {
-  const database = await openDatabase();
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(EPG_STORE, 'readwrite');
-      transaction.objectStore(EPG_STORE).put(snapshot);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error ?? new Error('Could not save the TV guide.'));
-      transaction.onabort = () => reject(transaction.error ?? new Error('TV guide save was interrupted.'));
-    });
-  } finally {
-    database.close();
-  }
 }
 
 export async function readCatalog(key: string): Promise<CachedCatalog | null> {
@@ -176,16 +144,14 @@ export async function writeCatalog(catalog: CachedCatalog): Promise<void> {
   }
 }
 
-export async function getRebuildableCacheCounts(): Promise<{ catalogs: number; guideSnapshots: number }> {
+export async function getRebuildableCacheCounts(): Promise<{ catalogs: number }> {
   const database = await openDatabase();
   try {
     return await new Promise((resolve, reject) => {
-      const transaction = database.transaction([STORE, EPG_STORE], 'readonly');
+      const transaction = database.transaction(STORE, 'readonly');
       const catalogs = transaction.objectStore(STORE).count();
-      const guideSnapshots = transaction.objectStore(EPG_STORE).count();
-      const counts = { catalogs: 0, guideSnapshots: 0 };
+      const counts = { catalogs: 0 };
       catalogs.onsuccess = () => { counts.catalogs = catalogs.result; };
-      guideSnapshots.onsuccess = () => { counts.guideSnapshots = guideSnapshots.result; };
       transaction.oncomplete = () => resolve(counts);
       transaction.onerror = () => reject(transaction.error ?? new Error('Could not inspect saved cache data.'));
       transaction.onabort = () => reject(transaction.error ?? new Error('Cache inspection was interrupted.'));
@@ -200,7 +166,7 @@ export async function clearRebuildableCaches(): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const request = window.indexedDB.deleteDatabase(DATABASE);
     request.onsuccess = () => resolve();
-    request.onerror = () => reject(request.error ?? new Error('Could not clear cached catalogs and guide data.'));
+    request.onerror = () => reject(request.error ?? new Error('Could not clear cached catalog data.'));
     request.onblocked = () => reject(new Error('The cache is in use. Close other NextFlix tabs and try again.'));
   });
 }

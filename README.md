@@ -1,4 +1,4 @@
-# NextFlix — Phase 7 and Phase 8 release candidate (0.6.1)
+# NextFlix — Development version 0.6.2
 
 Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 
@@ -24,7 +24,7 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 - Search the selected catalogue and filter it by the provider's category names.
 - Display provider posters, movie year/rating, and series episode lists when returned by the provider.
 - Play movie and episode streams through the same HTML5 player.
-- Load a single M3U playlist URL, parse `group-title`, `tvg-id`, and `tvg-logo`, and play its channel URLs directly.
+- Load a single M3U playlist URL, parse `group-title` and `tvg-logo`, and play its channel URLs directly.
 - Browse from a collapsible sidebar with Home, Search, Movies, Series, Live TV, My List, and Settings.
 - Show a featured title and poster rows on Home; open title details before playback.
 - Save movies and series to a local My List.
@@ -44,17 +44,13 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 - Set a preferred subtitle language from a supported language list; it persists per profile and applies when a matching track is exposed.
 - Find Disconnect only in Settings; browsing and playback no longer expose a normal-view disconnect action.
 - Create up to eight local viewer profiles, switch profiles from the sidebar, and keep favorites, subtitle preferences, and Continue Watching history separate by profile. Recommendations are calculated locally from each profile's watch history, favorites, provider categories, and series genres.
-- Keep the Live TV page fixed while only its channel list scrolls. Selecting a channel tunes the preview; selecting that same channel again opens it full screen. The TV Guide opens with the first channel in the active category/filter.
-- Fill the TV Guide screen with a large live preview above a bottom-anchored timeline. Reuse the current video element; moving guide focus never retunes the stream.
-- Scroll continuously through the guide’s channels with five rows visible at a time, virtualized around the current position. Keep the visible timeline to four hours, use a 24-hour clock, and fetch guide data for channels as they enter view.
-- Parse provider or custom XMLTV data with confident exact-ID/name matching, manual per-channel mappings, a 12-hour IndexedDB cache, seven-day retention, a 16 MB input cap, and an 80,000-program cap.
-- Fall back to Xtream `get_simple_data_table` guide requests when XMLTV is unavailable; provider listings are fetched in small channel batches as the guide is scrolled.
-- Show now/next details in Live TV and an hourly timeline covering the current time through the next four hours.
-- Offer Replay or Start Over only when Xtream channel data reports archive support and a valid archive duration.
+- Keep the Live TV page fixed while only its channel list scrolls. Selecting a channel tunes the preview; selecting that same channel again opens it full screen.
+- Hide native scrollbars and show light edge arrows only where more content is available in that direction.
 - Use locally stored playback progress only; no stream URLs or provider credentials are stored in watch history.
-- Export and restore app settings in an AES-GCM encrypted backup using a password-derived key. Backups include saved provider settings, profiles, favorites, category visibility, guide mappings, and history; rebuildable IndexedDB catalogs and EPG data are excluded.
-- Inspect app/browser, playback probes, local settings size, and IndexedDB cache counts in Settings. Clear only rebuildable catalog and guide caches without clearing profiles or viewing data.
-- Prune catalog and guide snapshots older than 14 days and retain at most two of each after a catalog refresh.
+- Export and restore app settings in an AES-GCM encrypted backup using a password-derived key. Backups include saved provider settings, profiles, favorites, category visibility, and history; rebuildable catalog data is excluded.
+- Inspect app/browser, playback probes, local settings size, and IndexedDB cache counts in Settings. Clear only rebuildable catalog caches without clearing profiles or viewing data.
+- Prune catalog snapshots older than 14 days and retain at most two after a catalog refresh.
+- Optionally enrich VOD details through a user-provided OMDb API key and search external subtitles through a user-provided OpenSubtitles API consumer key.
 - Check public GitHub Releases on demand. NextFlix never installs an update automatically.
 - Navigate with directional remote keys and get focus return when closing title details.
 - Require three Back presses on Home before showing the exit confirmation; Back closes the player or returns to Home from a subpage.
@@ -95,8 +91,8 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - The channel cache uses IndexedDB and stores rebuildable provider catalogue data, not IPTV credentials. If IndexedDB is unavailable, the app still connects but cannot show the catalogue offline.
 - Remembered credentials use unencrypted app local storage on the TV. The password is visible in this test build.
 - This project targets one IPTV provider at a time; multi-provider merging is intentionally out of scope.
-- External subtitle loading, source failover, and local pairing are not implemented yet.
-- The Phase 5 EPG guide and catch-up implementation is new and has not yet been verified against the user's IPTV provider or on the physical TV. XMLTV downloads require provider CORS support; compressed XMLTV files that are not transparently decompressed by the browser are unsupported. The provider API fallback fetches guide data per channel and is intentionally on demand.
+- External subtitle search and WebVTT playback are implemented but still need verification on the LG TV; source failover and local pairing are not implemented.
+- The TV Guide, XMLTV downloads, provider EPG requests, and catch-up controls have been removed in 0.6.2 to reduce background requests and app work.
 - Encrypted backup export/import and download/file-picker behavior need testing on the physical TV. If Web Crypto or browser file handling is unavailable, the backup actions report the limitation instead of writing a plaintext backup. Normal packaged webOS apps cannot host a temporary inbound HTTP pairing server, so TV-phone local pairing and LAN-based file transfer are not implemented; manual setup and encrypted file backup remain the supported paths.
 - The GitHub release check is user initiated and requires the TV browser to reach `api.github.com`; it only links to the release page and never installs or replaces the app.
 - Catch-up URL construction follows the Xtream timeshift route pattern, but the provider must advertise archive support and accept the requested archive stream. Actual Replay and Start Over remain unverified.
@@ -119,14 +115,12 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - [ ] Test Phase 4 player icon controls, VOD seeking, resume position, and progress cleanup on completion on the TV.
 - [ ] Test language-filter focus restoration, card-title truncation, audio/subtitle selection, preferred-language behavior, and series autoplay on the TV.
 - [ ] Test 20-item Movies/Series pagination, filtered page counts, dropdown confirm/cancel, input edit/Back behavior, and Disconnect location on the TV.
-- [x] Phase 5 implementation: EPG timeline, cached provider/XMLTV data, manual channel mappings, live preview, and archive-gated replay actions.
-- [ ] Phase 5 TV validation: test guide preview, current/next data, XMLTV and mapping, channel switching, archive Replay/Start Over, and recovery from guide/network errors.
-- [ ] Verify Live TV's large preview, same-channel fullscreen toggle, first filtered channel when opening TV Guide, five-channel/four-hour guide, 24-hour labels, and all editable input proxies on the LG TV.
+- [x] Phase 5 guide implementation was removed in 0.6.2 at the user's request; the app no longer fetches EPG/XMLTV data.
 - [x] Phase 6 implementation: local viewer profiles, profile-scoped favorites/subtitle preferences/watch history, and local recommendations.
 - [ ] Phase 6 TV validation: create and switch profiles, confirm favorites and resume history remain separate, and verify subtitle preference persistence.
 - [x] Phase 7 implementation: password-encrypted settings backup/restore, rebuildable cache cleanup, local diagnostics, and an on-demand manual release check.
-- [x] Phase 7 storage safeguard: bound rebuildable IndexedDB snapshots to two catalogs and two guides, pruning entries older than 14 days.
+- [x] Phase 7 storage safeguard: bound rebuildable IndexedDB snapshots to two catalogs, pruning entries older than 14 days.
 - [ ] Phase 7 TV validation: verify backup file export/import and passphrase handling, cache cleanup preserves profiles/history, diagnostics report gracefully, and the optional release check works on TV.
 - [ ] Phase 7 feasibility item: local phone pairing/LAN transfer remains unavailable to ordinary packaged apps without a listener service; keep manual entry and encrypted backup as the safe alternatives.
-- [x] Phase 8 local gate: TypeScript and Vite build, credential-free 0.6.1 IPK packaging, and encrypted backup round-trip verification.
-- [ ] Phase 8 TV gate: follow [release checklist](RELEASE-CHECKLIST.md) on the LG before calling 0.6.1 release ready.
+- [ ] Phase 8 local gate: rebuild and package 0.6.2 before release.
+- [ ] Phase 8 TV gate: verify 0.6.2 scrolling cues, catalogue filters, player controls, metadata, and external subtitle behavior on the LG.
