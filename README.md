@@ -1,6 +1,12 @@
-# NextFlix — Version 1.0.2
+# NextFlix — Version 1.0.4
 
-Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
+Lightweight IPTV player for LG webOS. The single app package targets Chromium 53 for older webOS 4.x TVs and remains compatible with newer webOS releases.
+
+## App artwork preview
+
+| NextFlix app icon | Home | Movies | Series | Live TV | My List | Settings |
+|---|---|---|---|---|---|---|
+| ![NextFlix app icon](public/largeIcon.png) | ![Home navigation icon](public/icons/home.png) | ![Movies navigation icon](public/icons/movies.png) | ![Series navigation icon](public/icons/series.png) | ![Live TV navigation icon](public/icons/live.png) | ![My List navigation icon](public/icons/my-list.png) | ![Settings navigation icon](public/icons/settings.png) |
 
 ## Current scope
 
@@ -71,7 +77,7 @@ pnpm install
 pnpm build
 ```
 
-Vite emits the static app into `dist/`, targeting Chromium 79. The package build rewrites Vite's module entry to a self-contained classic script because webOS launches packaged app resources from a `file:` URL. The metadata and original icons in `public/` are copied into `dist/`. Run `pnpm package` to create a public IPK in `packages/`; the script overrides local test-provider variables and checks the output before calling LG's webOS TV CLI (`@webos-tools/cli`).
+Vite emits the static app into `dist/`, targeting Chromium 53, the web engine used by webOS 4.x; the same package also targets newer webOS TVs. The package build rewrites Vite's module entry to a self-contained classic script because webOS launches packaged app resources from a `file:` URL. The metadata and original icons in `public/` are copied into `dist/`. Run `pnpm package` to create a public IPK in `packages/`; the script overrides local test-provider variables and checks the output before calling LG's webOS TV CLI (`@webos-tools/cli`).
 
 ## Rooted LG TV installation
 

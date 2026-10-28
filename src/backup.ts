@@ -25,10 +25,10 @@ export type BackupPayload = {
 };
 
 function requireCrypto(): SubtleCrypto {
-  if (!globalThis.crypto?.subtle || !globalThis.crypto.getRandomValues) {
+  if (!window.crypto?.subtle || !window.crypto.getRandomValues) {
     throw new Error('Secure encryption is unavailable in this app environment. No backup was created.');
   }
-  return globalThis.crypto.subtle;
+  return window.crypto.subtle;
 }
 
 function toBase64(bytes: Uint8Array): string {

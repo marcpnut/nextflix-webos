@@ -1,3 +1,5 @@
+import { createAbortController } from './platform/abort';
+
 export type TmdbMetadata = {
   overview: string;
   year: string;
@@ -71,7 +73,7 @@ function apiUrl(path: string, apiKey: string, params: Record<string, string> = {
 }
 
 async function getJson<T>(url: string, headers: HeadersInit): Promise<T> {
-  const controller = new AbortController();
+  const controller = createAbortController();
   const timeout = window.setTimeout(() => controller.abort(), 10_000);
   try {
     const response = await fetch(url, { headers, signal: controller.signal });
@@ -138,19 +140,21 @@ export async function fetchTmdbHomePlaylist(playlist: TmdbHomePlaylist, apiKey: 
   if (!config || !apiKey.trim()) return [];
   const request = apiUrl(config.path, apiKey, { language: 'en-US', page: '1' });
   const response = await getJson<TmdbListResponse>(request.url, request.headers);
-  return (response.results ?? []).slice(0, 20).flatMap((item) => {
-    if (!item.id) return [];
+  const entries: TmdbHomeEntry[] = [];
+  for (const item of (response.results ?? []).slice(0, 20)) {
+    if (!item.id) continue;
     const title = itemTitle(item);
-    if (!title) return [];
-    return [{
+    if (!title) continue;
+    entries.push({
       id: item.id,
       title,
       year: itemYear(item),
       poster: imageUrl(item.poster_path, 'w500'),
       backdrop: imageUrl(item.backdrop_path, 'w780'),
       overview: String(item.overview ?? '').trim()
-    }];
-  });
+    });
+  }
+  return entries;
 }
 
 export async function findTmdbMetadata(kind: 'movie' | 'series', rawTitle: string, rawYear: string, apiKey: string): Promise<TmdbMetadata | null> {

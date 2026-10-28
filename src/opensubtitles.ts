@@ -1,9 +1,10 @@
 import { cleanTitle } from './metadata';
+import { createAbortController } from './platform/abort';
 
 export type OnlineSubtitle = { fileId: number; language: string; release: string; downloadCount: number };
 
 async function request(url: string, key: string, body?: object): Promise<any> {
-  const controller = new AbortController();
+  const controller = createAbortController();
   const timeout = window.setTimeout(() => controller.abort(), 12_000);
   try {
     const response = await fetch(url, {
@@ -46,7 +47,7 @@ export async function downloadOnlineSubtitle(key: string, fileId: number): Promi
   const result = await request('https://api.opensubtitles.com/api/v1/download', key, { file_id: fileId, sub_format: 'srt' });
   const url = String(result.link ?? '');
   if (!url.startsWith('https://')) throw new Error('OpenSubtitles did not return a secure download link.');
-  const controller = new AbortController();
+  const controller = createAbortController();
   const timeout = window.setTimeout(() => controller.abort(), 15_000);
   try {
     const response = await fetch(url, { signal: controller.signal });

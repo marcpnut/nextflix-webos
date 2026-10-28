@@ -1,5 +1,7 @@
+import './platform/legacyCompat';
 import './style.css';
 import './platform/webOSTV.js';
+import { createAbortController } from './platform/abort';
 import {
   readCatalog,
   writeCatalog,
@@ -154,7 +156,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.3';
+const APP_VERSION = '1.0.4';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -392,7 +394,7 @@ function normalizedBase(value: string): string {
 
 async function api<T>(action?: string, extra: Record<string, string> = {}, timeoutMs = 60_000): Promise<T> {
   if (!credentials) throw new Error('Connect to a provider first.');
-  const controller = new AbortController();
+  const controller = createAbortController();
   requestControllers.add(controller);
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   const query = new URLSearchParams({ username: credentials.username, password: credentials.password, ...extra });
@@ -479,7 +481,7 @@ function parseM3U(text: string): { channels: Channel[]; categories: Category[] }
 }
 
 async function fetchM3U(url: string): Promise<string> {
-  const controller = new AbortController();
+  const controller = createAbortController();
   requestControllers.add(controller);
   const timeout = window.setTimeout(() => controller.abort(), 180_000);
   try {
@@ -1234,7 +1236,7 @@ function compareVersions(left: string, right: string): number {
 async function checkForAppUpdate(): Promise<void> {
   updateStatus.textContent = 'Checking public GitHub Releases…';
   releaseLink.classList.add('hidden');
-  const controller = new AbortController();
+  const controller = createAbortController();
   const timeout = window.setTimeout(() => controller.abort(), 12_000);
   try {
     const response = await fetch('https://api.github.com/repos/marcpnut/nextflix-webos/releases/latest', {
@@ -1266,7 +1268,8 @@ function playbackTime(seconds: number): string {
   const hours = Math.floor(whole / 3600);
   const minutes = Math.floor((whole % 3600) / 60);
   const secs = whole % 60;
-  return hours ? `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}` : `${minutes}:${String(secs).padStart(2, '0')}`;
+  const twoDigits = (part: number) => part < 10 ? `0${part}` : String(part);
+  return hours ? `${hours}:${twoDigits(minutes)}:${twoDigits(secs)}` : `${minutes}:${twoDigits(secs)}`;
 }
 
 function updatePlayPauseControl(isPlaying: boolean): void {
@@ -1977,7 +1980,7 @@ function refreshHomePlaylists(): Promise<void> {
   const pending = selectedHomePlaylists.filter((id) => !homePlaylistCache[id]
     || Date.now() - (homePlaylistCache[id]?.savedAt ?? 0) > HOME_PLAYLIST_CACHE_MS);
   if (!tmdbApiKey || !pending.length) return Promise.resolve();
-  homePlaylistRefresh = (async () => {
+  const refreshWork = (async () => {
     for (let index = 0; index < pending.length; index += 3) {
       await Promise.all(pending.slice(index, index + 3).map(async (id) => {
         try { homePlaylistCache[id] = { savedAt: Date.now(), entries: await fetchTmdbHomePlaylist(id, tmdbApiKey) }; }
@@ -1986,7 +1989,13 @@ function refreshHomePlaylists(): Promise<void> {
     }
     try { localStorage.setItem(HOME_PLAYLIST_CACHE_KEY, JSON.stringify(homePlaylistCache)); } catch { /* Rows remain in memory this session. */ }
     renderTmdbHomeRows();
-  })().finally(() => { homePlaylistRefresh = null; });
+  })();
+  homePlaylistRefresh = refreshWork.then(() => {
+    homePlaylistRefresh = null;
+  }, (error) => {
+    homePlaylistRefresh = null;
+    throw error;
+  });
   return homePlaylistRefresh;
 }
 

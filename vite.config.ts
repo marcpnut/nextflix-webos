@@ -3,8 +3,8 @@ import { defineConfig } from 'vite';
 export default defineConfig({
   base: './',
   build: {
-    target: 'chrome79',
-    cssTarget: 'chrome79',
+    target: 'chrome53',
+    cssTarget: 'chrome53',
     modulePreload: false,
     sourcemap: false,
     minify: 'esbuild',
