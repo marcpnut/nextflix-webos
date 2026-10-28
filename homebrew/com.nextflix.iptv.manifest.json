@@ -1,16 +1,16 @@
 {
   "id": "com.nextflix.iptv",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "type": "web",
   "title": "NextFlix",
-  "appDescription": "C9 usability test build. Fixes text-edit key capture and shows startup loading progress until Xtream catalogs are ready on Chromium 53.",
+  "appDescription": "Player controls test build. Auto-hide starts on playback start/resume and remains visible while paused.",
   "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
   "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
   "rootRequired": false,
-  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.9_all.ipk",
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.10_all.ipk",
   "ipkHash": {
-    "sha256": "ffb93e2319fe902ab524fd1af9f191d98778561750acef0ddaabb57353a88607"
+    "sha256": "5927532adcd87e6e98e5b31efb63421c2469b462c70f85c07a5ae7010bf90cb5"
   },
-  "ipkSize": 67532,
-  "installedSize": 205331
+  "ipkSize": 67578,
+  "installedSize": 205432
 }

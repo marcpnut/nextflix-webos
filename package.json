@@ -1,6 +1,6 @@
 {
   "name": "nextflix-webos",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "private": true,
   "description": "A lightweight Xtream live TV player for LG webOS",
   "scripts": {

@@ -157,7 +157,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.9';
+const APP_VERSION = '1.0.10';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -273,6 +273,7 @@ let seekHoldDirection: -1 | 1 | 0 = 0;
 let seekHoldStartedAt = 0;
 let seekHoldLastSignal = 0;
 let playerControlsHideTimer = 0;
+let playerPlaybackActive = false;
 let activeDropdown: DropdownControl | null = null;
 let focusedDropdownOption = 0;
 let editingInput: HTMLInputElement | null = null;
@@ -1514,10 +1515,10 @@ function updatePlayPauseControl(isPlaying: boolean): void {
 function schedulePlayerControlsHide(): void {
   window.clearTimeout(playerControlsHideTimer);
   playerControlsHideTimer = 0;
-  if (playerLayer.classList.contains('hidden') || video.paused) return;
+  if (playerLayer.classList.contains('hidden') || !playerPlaybackActive) return;
   playerControlsHideTimer = window.setTimeout(() => {
     playerControlsHideTimer = 0;
-    if (openTrackMenu || video.paused) return;
+    if (openTrackMenu || !playerPlaybackActive) return;
     const active = document.activeElement as HTMLElement | null;
     if (active && playerLayer.contains(active) && active !== video) active.blur();
     playerLayer.classList.add('controls-hidden');
@@ -3071,6 +3072,7 @@ async function startPlayback(
   display: 'fullscreen' | 'preview' = 'fullscreen'
 ): Promise<void> {
   playbackGeneration += 1;
+  playerPlaybackActive = false;
   onlineSubtitleChoices = [];
   onlineSubtitleLoading = false;
   if (externalSubtitleElement) externalSubtitleElement.remove();
@@ -3132,6 +3134,8 @@ async function startPlayback(
   video.load();
   try {
     await video.play();
+    playerPlaybackActive = true;
+    schedulePlayerControlsHide();
     playerMessage.textContent = '';
     livePreviewMessage.textContent = '';
     if (display === 'fullscreen') playPauseButton.focus();
@@ -3213,6 +3217,7 @@ function closePlayer(stopPlayback = false): void {
   closeTrackMenu(false);
   window.clearTimeout(playerControlsHideTimer);
   playerControlsHideTimer = 0;
+  playerPlaybackActive = false;
   const streamFailed = playerLayer.classList.contains('stream-failed');
   playerLayer.classList.remove('controls-hidden');
   playerLayer.classList.remove('stream-failed');
@@ -3788,12 +3793,19 @@ video.addEventListener('timeupdate', () => {
   saveWatchProgress();
 });
 video.addEventListener('playing', () => {
+  playerPlaybackActive = true;
   clearStreamFallbackState();
   playerMessage.textContent = '';
   if (video.parentElement === livePreview) livePreviewMessage.textContent = '';
   updatePlayPauseControl(true);
+  schedulePlayerControlsHide();
 });
-video.addEventListener('pause', () => updatePlayPauseControl(false));
+video.addEventListener('pause', () => {
+  playerPlaybackActive = false;
+  window.clearTimeout(playerControlsHideTimer);
+  playerControlsHideTimer = 0;
+  updatePlayPauseControl(false);
+});
 video.addEventListener('ended', () => {
   saveWatchProgress(true, true);
   startEpisodeCountdown();
@@ -3804,6 +3816,9 @@ video.addEventListener('waiting', () => {
   if (video.parentElement === livePreview) livePreviewMessage.textContent = 'Buffering…';
 });
 video.addEventListener('error', () => {
+  playerPlaybackActive = false;
+  window.clearTimeout(playerControlsHideTimer);
+  playerControlsHideTimer = 0;
   const error = describePlaybackFailure();
   showStreamFallbackArtwork();
   if (!playerLayer.classList.contains('hidden')) playerMessage.textContent = error;
