@@ -1,16 +1,16 @@
 {
   "id": "com.nextflix.iptv",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "type": "web",
   "title": "NextFlix",
-  "appDescription": "Fixes TV login persistence and restores native keyboard input behavior.",
+  "appDescription": "Reuses fresh catalogs and fixes media card sizing and Settings navigation.",
   "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
   "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
   "rootRequired": false,
-  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.21_all.ipk",
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.22_all.ipk",
   "ipkHash": {
-    "sha256": "c97eeb9bc7bda9f0e3d517e121ca3cbe8ee7e2f093c50f866618bf8c2415812a"
+    "sha256": "0426c6e52a692e5ea03da2fc0dbaef9ebb96f7b502030b1d7efaacdf1af6e238"
   },
-  "ipkSize": 67502,
-  "installedSize": 209596
+  "ipkSize": 67544,
+  "installedSize": 209943
 }

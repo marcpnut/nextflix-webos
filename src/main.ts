@@ -158,7 +158,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.21';
+const APP_VERSION = '1.0.22';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -2630,7 +2630,10 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       activeLiveFormat = cache.liveFormat ?? null;
       showCatalog(cache.savedAt);
       const fresh = Date.now() - cache.savedAt < CATALOG_REFRESH_MS;
-      if (fresh && options.startup && (sourceType === 'm3u' || (Array.isArray(cache.movies) && Array.isArray(cache.series)))) {
+      // A fresh catalog is sufficient for both auto-reconnect and a manual
+      // Connect action. Avoid fetching the same large provider lists on every
+      // app launch; stale catalogs continue through the refresh path below.
+      if (fresh && (sourceType === 'm3u' || (Array.isArray(cache.movies) && Array.isArray(cache.series)))) {
         stateLabel.textContent = 'Connected';
         libraryMessage.textContent = 'Using your saved channels. They refresh automatically after 24 hours.';
         setBusy(false);
@@ -2757,6 +2760,8 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
 }
 
 function renderChannels(append = false): void {
+  const mediaCatalog = catalogView !== 'live' || !!activeSeries;
+  channelList.classList.toggle('media-catalog', mediaCatalog);
   const category = categorySelect.value;
   const query = searchInput.value.trim().toLowerCase();
   visibleChannels = catalogView === 'live' && !activeSeries
@@ -3438,9 +3443,16 @@ function focusBestGeometricCandidate(active: HTMLElement, keyCode: number): bool
   return true;
 }
 
+function isTextEntryControl(element: HTMLElement | null): boolean {
+  if (!element) return false;
+  if (element instanceof HTMLTextAreaElement || element.isContentEditable) return true;
+  if (!(element instanceof HTMLInputElement)) return false;
+  return !['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'file', 'color', 'image', 'hidden'].includes(element.type);
+}
+
 function moveDirectionalFocus(keyCode: number): boolean {
   const active = document.activeElement as HTMLElement | null;
-  if (!active || active.isContentEditable || active.tagName === 'TEXTAREA' || active instanceof HTMLInputElement) return false;
+  if (!active || isTextEntryControl(active)) return false;
   const settingsNav = sidebar.querySelector<HTMLButtonElement>('.nav-button[data-page="settings"]');
   if (active === settingsNav && keyCode === 40) {
     profileSwitchButton.focus();
@@ -3819,8 +3831,7 @@ window.addEventListener('keydown', (event) => {
   const target = document.activeElement as HTMLElement | null;
   // Do not translate, prevent, or redirect keys while a native text field is
   // focused. The webOS/browser input method must own caret, Backspace, and arrows.
-  if ((target instanceof HTMLInputElement && !['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'file', 'color', 'image', 'hidden'].includes(target.type))
-    || target instanceof HTMLTextAreaElement || target?.isContentEditable) return;
+  if (isTextEntryControl(target)) return;
   const keyName = (event.key || '').toLowerCase();
   const keyCode = keyName === 'arrowleft' || keyName === 'left' ? 37 : keyName === 'arrowup' || keyName === 'up' ? 38
     : keyName === 'arrowright' || keyName === 'right' ? 39 : keyName === 'arrowdown' || keyName === 'down' ? 40

@@ -1,0 +1,16 @@
+{
+  "id": "com.nextflix.iptv",
+  "version": "1.0.22",
+  "type": "web",
+  "title": "NextFlix",
+  "appDescription": "Reuses fresh catalogs and fixes media card sizing and Settings navigation.",
+  "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
+  "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
+  "rootRequired": false,
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.22_all.ipk",
+  "ipkHash": {
+    "sha256": "0426c6e52a692e5ea03da2fc0dbaef9ebb96f7b502030b1d7efaacdf1af6e238"
+  },
+  "ipkSize": 67544,
+  "installedSize": 209943
+}
