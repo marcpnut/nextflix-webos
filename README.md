@@ -1,4 +1,4 @@
-# NextFlix — Development version 0.6.5
+# NextFlix — Development version 0.6.6
 
 Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 
@@ -50,7 +50,7 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 - Export and restore app settings in an AES-GCM encrypted backup using a password-derived key. Backups include saved provider settings, profiles, favorites, category visibility, and history; rebuildable catalog data is excluded.
 - Inspect app/browser, playback probes, local settings size, and IndexedDB cache counts in Settings. Clear only rebuildable catalog caches without clearing profiles or viewing data.
 - Prune catalog snapshots older than 14 days and retain at most two after a catalog refresh.
-- Optionally enrich VOD details through a user-provided OMDb API key and search external subtitles through a user-provided OpenSubtitles API consumer key.
+- Optionally enrich VOD details through a user-provided TMDB API key and search external subtitles through a user-provided OpenSubtitles API consumer key.
 - Check public GitHub Releases on demand. NextFlix never installs an update automatically.
 - Navigate with directional remote keys and get focus return when closing title details.
 - Require three Back presses on Home before showing the exit confirmation; Back closes the player or returns to Home from a subpage.
@@ -122,5 +122,5 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - [x] Phase 7 storage safeguard: bound rebuildable IndexedDB snapshots to two catalogs, pruning entries older than 14 days.
 - [ ] Phase 7 TV validation: verify backup file export/import and passphrase handling, cache cleanup preserves profiles/history, diagnostics report gracefully, and the optional release check works on TV.
 - [ ] Phase 7 feasibility item: local phone pairing/LAN transfer remains unavailable to ordinary packaged apps without a listener service; keep manual entry and encrypted backup as the safe alternatives.
-- [ ] Phase 8 local gate: rebuild and package 0.6.5 before release.
-- [ ] Phase 8 TV gate: verify 0.6.5 player navigation, subtitle overlays, TV scroll arrows, focus visibility at all grid edges, metadata, and external subtitle behavior on the LG.
+- [ ] Phase 8 local gate: rebuild and package 0.6.6 before release.
+- [ ] Phase 8 TV gate: verify 0.6.6 player navigation, subtitle overlays, TV scroll arrows, focus visibility at all grid edges, metadata, and external subtitle behavior on the LG.

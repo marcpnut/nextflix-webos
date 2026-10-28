@@ -14,7 +14,7 @@ import {
   type SeriesEpisode
 } from './catalogCache';
 import { decryptBackup, encryptBackup, type BackupPayload } from './backup';
-import { findOmdbMetadata } from './metadata';
+import { findTmdbMetadata } from './metadata';
 import { searchOnlineSubtitles, downloadOnlineSubtitle, type OnlineSubtitle } from './opensubtitles';
 import { WebOsMediaSubtitleAdapter, type WebOsSubtitleTrack } from './platform/webos-media';
 
@@ -111,7 +111,7 @@ const diagnosticsSummary = $('diagnostics-summary');
 const cacheStatus = $('cache-status');
 const updateStatus = $('update-status');
 const releaseLink = $('release-link') as HTMLAnchorElement;
-const omdbKeyInput = $('omdb-api-key') as HTMLInputElement;
+const tmdbKeyInput = $('tmdb-api-key') as HTMLInputElement;
 const opensubtitlesKeyInput = $('opensubtitles-key') as HTMLInputElement;
 const metadataSettingsStatus = $('metadata-settings-status');
 const exitConfirm = $('exit-confirm');
@@ -142,7 +142,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.6.5';
+const APP_VERSION = '0.6.6';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -179,9 +179,10 @@ let activeProfileId = 'default';
 const FAVORITES_KEY = 'nextflix.my-list.v1';
 const WATCH_HISTORY_KEY = 'nextflix.watch-history.v1';
 const TRACK_PREFERENCES_KEY = 'nextflix.track-preferences.v1';
-const OMDB_API_KEY = 'nextflix.omdb-api-key.v1';
+const TMDB_API_KEY = 'nextflix.tmdb-api-key.v1';
+const LEGACY_OMDB_API_KEY = 'nextflix.omdb-api-key.v1';
 const OPENSUBTITLES_KEY = 'nextflix.opensubtitles-key.v1';
-let omdbApiKey = '';
+let tmdbApiKey = '';
 let opensubtitlesKey = '';
 let onlineSubtitleChoices: OnlineSubtitle[] = [];
 let onlineSubtitleLoading = false;
@@ -1610,13 +1611,13 @@ function toggleFavorite(kind: 'movie' | 'series', id: number | string): void {
 }
 
 async function enrichDetail(kind: 'movie' | 'series', item: Movie | Series, title: string, year: string): Promise<void> {
-  if (!omdbApiKey) return;
-  detailSource.textContent = 'Loading movie information from OMDb…';
+  if (!tmdbApiKey) return;
+  detailSource.textContent = 'Loading movie information from TMDB…';
   try {
-    const metadata = await findOmdbMetadata(kind, title, year, omdbApiKey);
+    const metadata = await findTmdbMetadata(kind, title, year, tmdbApiKey);
     if (currentPage !== 'detail' || detailItem?.item !== item) return;
     if (!metadata) {
-      detailSource.textContent = 'No exact OMDb match; showing provider information.';
+      detailSource.textContent = 'No exact TMDB match; showing provider information.';
       return;
     }
     if (metadata.overview) detailDescription.textContent = metadata.overview;
@@ -1624,14 +1625,14 @@ async function enrichDetail(kind: 'movie' | 'series', item: Movie | Series, titl
     const currentMeta = detailMeta.textContent?.trim() ?? '';
     const metadataYear = metadata.year && !currentMeta.includes(metadata.year) ? metadata.year : '';
     if (metadataYear || metadata.genres) detailMeta.textContent = [metadataYear, currentMeta, metadata.genres].filter(Boolean).join(' · ');
-    if (!detailPoster.getAttribute('src') && metadata.poster) {
+    if (metadata.poster) {
       detailPoster.src = metadata.poster;
       detailPoster.classList.remove('hidden');
     }
-    detailSource.textContent = 'Movie information from OMDb · CC BY-NC 4.0';
+    detailSource.textContent = 'Movie information from TMDB';
   } catch (error) {
     if (currentPage === 'detail' && detailItem?.item === item) {
-      detailSource.textContent = error instanceof Error ? `OMDb unavailable: ${error.message}` : 'OMDb information is unavailable.';
+      detailSource.textContent = error instanceof Error ? `TMDB unavailable: ${error.message}` : 'TMDB information is unavailable.';
     }
   }
 }
@@ -3074,11 +3075,12 @@ $('refresh-diagnostics').addEventListener('click', () => { void refreshDiagnosti
 $('clear-cache').addEventListener('click', () => { void clearSavedCaches(); });
 $('check-updates').addEventListener('click', () => { void checkForAppUpdate(); });
 $('save-metadata-keys').addEventListener('click', () => {
-  omdbApiKey = omdbKeyInput.value.trim();
+  tmdbApiKey = tmdbKeyInput.value.trim();
   opensubtitlesKey = opensubtitlesKeyInput.value.trim();
   try {
+    localStorage.removeItem(LEGACY_OMDB_API_KEY);
+    if (tmdbApiKey) localStorage.setItem(TMDB_API_KEY, tmdbApiKey); else localStorage.removeItem(TMDB_API_KEY);
     localStorage.removeItem('nextflix.tmdb-token.v1');
-    if (omdbApiKey) localStorage.setItem(OMDB_API_KEY, omdbApiKey); else localStorage.removeItem(OMDB_API_KEY);
     if (opensubtitlesKey) localStorage.setItem(OPENSUBTITLES_KEY, opensubtitlesKey); else localStorage.removeItem(OPENSUBTITLES_KEY);
     metadataSettingsStatus.textContent = 'API keys saved on this TV.';
   } catch { metadataSettingsStatus.textContent = 'TV storage could not save the API keys.'; }
@@ -3295,10 +3297,12 @@ try {
 } catch { /* Defaults are used when local storage is unavailable. */ }
 loadWatchHistory();
 try {
+  localStorage.removeItem(LEGACY_OMDB_API_KEY);
+  tmdbApiKey = localStorage.getItem(TMDB_API_KEY) ?? localStorage.getItem('nextflix.tmdb-token.v1') ?? '';
+  if (tmdbApiKey) localStorage.setItem(TMDB_API_KEY, tmdbApiKey);
   localStorage.removeItem('nextflix.tmdb-token.v1');
-  omdbApiKey = localStorage.getItem(OMDB_API_KEY) ?? '';
   opensubtitlesKey = localStorage.getItem(OPENSUBTITLES_KEY) ?? '';
-  omdbKeyInput.value = omdbApiKey;
+  tmdbKeyInput.value = tmdbApiKey;
   opensubtitlesKeyInput.value = opensubtitlesKey;
 } catch { /* Optional API keys remain unavailable when local storage is blocked. */ }
 populateLanguagePreferences();

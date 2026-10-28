@@ -109,16 +109,20 @@
               </section>
               <section class="maintenance-settings" aria-labelledby="metadata-settings-title">
                 <h2 id="metadata-settings-title">Movie information and subtitles</h2>
-                <p class="muted">These optional API keys are saved in this TV’s browser storage, unencrypted. Treat them like passwords. NextFlix sends them directly to their respective services; they are not sent to NextFlix servers. OMDb can add movie and series details when a title matches exactly; OpenSubtitles.com can find external subtitles when the stream has none.</p>
+                <p class="muted">These optional API keys are saved in this TV’s browser storage, unencrypted. Treat them like passwords. NextFlix sends them directly to their respective services; they are not sent to NextFlix servers. TMDB can add movie and series descriptions, artwork, genres, and cast; OpenSubtitles.com can find external subtitles when the stream has none.</p>
                 <ol class="api-key-steps">
-                  <li><a href="https://www.omdbapi.com/apikey.aspx" target="_blank" rel="noopener noreferrer">OMDb API key page</a>: choose the free option, request a key, and use the key sent to your email. The free tier allows 1,000 requests per day. OMDb lists its poster API as patron-only; NextFlix keeps the provider poster when OMDb has no usable poster.</li>
+                  <li><a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noopener noreferrer">TMDB API settings</a>: create a TMDB account, request an API key, and copy the API Key (v3 auth). The API Read Access Token is also accepted.</li>
                   <li><a href="https://www.opensubtitles.com/consumers" target="_blank" rel="noopener noreferrer">OpenSubtitles API consumers</a>: sign in, register an application, and copy its API key. A website account password is not an API key.</li>
                   <li>Enter each value below and choose <strong>Save API keys</strong>. Leave either field blank if you do not want that service.</li>
                 </ol>
-                <label>OMDb API key<input id="omdb-api-key" type="password" autocomplete="off" placeholder="Paste your OMDb API key" /></label>
+                <label>TMDB API key or read access token<input id="tmdb-api-key" type="password" autocomplete="off" placeholder="Paste your TMDB API key or read token" /></label>
                 <label>OpenSubtitles.com API key<input id="opensubtitles-key" type="password" autocomplete="off" placeholder="Paste your OpenSubtitles API key" /></label>
                 <div class="settings-actions"><button id="save-metadata-keys">Save API keys</button><span id="metadata-settings-status" role="status"></span></div>
-                <p class="maintenance-status">Metadata from the <a href="https://www.omdbapi.com/" target="_blank" rel="noopener noreferrer">OMDb API</a> is licensed under <a href="https://creativecommons.org/licenses/by-nc/4.0/" target="_blank" rel="noopener noreferrer">CC BY-NC 4.0</a>. NextFlix is not endorsed by or affiliated with IMDb.</p>
+                <section class="tmdb-credits" aria-labelledby="tmdb-credits-title">
+                  <h3 id="tmdb-credits-title">Credits and attribution</h3>
+                  <a href="https://www.themoviedb.org/" target="_blank" rel="noopener noreferrer" aria-label="The Movie Database (TMDB)"><img src="/tmdb-logo.svg" alt="The Movie Database (TMDB)" /></a>
+                  <p>This product uses the TMDB API but is not endorsed or certified by TMDB.</p>
+                </section>
               </section>
               <section class="settings-account"><h2>Provider</h2><button id="disconnect-button" class="quiet">Disconnect</button></section>
             </section>
