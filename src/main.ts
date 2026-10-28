@@ -127,6 +127,7 @@ const metadataSettingsStatus = $('metadata-settings-status');
 const exitConfirm = $('exit-confirm');
 const backHint = $('back-hint');
 const screenLoadingDialog = $('screen-loading');
+const screenLoadingTitle = $('screen-loading-title');
 const screenLoadingMessage = $('screen-loading-message');
 const screenLoadingDemo = !document.documentElement.classList.contains('webos-tv')
   && window.location.search.indexOf('loadingDemo=1') >= 0;
@@ -156,7 +157,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.8';
+const APP_VERSION = '1.0.9';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -262,6 +263,8 @@ let providerLoadGeneration = 0;
 let catalogBackgroundLoad: Promise<void> | null = null;
 let screenLoadingTimer = 0;
 let screenLoadingGeneration = 0;
+let providerPreloadTimer = 0;
+let providerPreloadActive = false;
 let backPressCount = 0;
 let backPressResetTimer = 0;
 let backHintTimer = 0;
@@ -307,9 +310,33 @@ function setMessage(text: string, isError = false): void {
   message.classList.toggle('error', isError);
 }
 
+function isLegacyWebOsBrowser(): boolean {
+  return /Chrome\/53\.0/.test(navigator.userAgent) && /WebAppManager/.test(navigator.userAgent);
+}
+
+function beginProviderPreload(): void {
+  if (!isLegacyWebOsBrowser()) return;
+  providerPreloadActive = true;
+  window.clearTimeout(providerPreloadTimer);
+  screenLoadingTitle.textContent = 'Preparing your library';
+  screenLoadingMessage.textContent = 'Connecting to your provider…';
+  providerPreloadTimer = window.setTimeout(() => {
+    if (providerPreloadActive) screenLoadingDialog.classList.remove('hidden');
+  }, 350);
+}
+
+function finishProviderPreload(): void {
+  window.clearTimeout(providerPreloadTimer);
+  providerPreloadTimer = 0;
+  providerPreloadActive = false;
+  screenLoadingDialog.classList.add('hidden');
+  screenLoadingTitle.textContent = 'Loading your streams';
+}
+
 function setProgress(text: string): void {
   setMessage(text);
   stateLabel.textContent = text;
+  if (providerPreloadActive) screenLoadingMessage.textContent = text;
   if (!librarySection.classList.contains('hidden')) {
     libraryMessage.textContent = text;
     libraryMessage.classList.remove('hidden', 'error');
@@ -560,8 +587,7 @@ async function api<T>(action?: string, extra: Record<string, string> = {}, timeo
   requestControllers.add(controller);
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const legacyWebOsFetch = /Chrome\/53\.0/.test(navigator.userAgent) && /WebAppManager/.test(navigator.userAgent);
-    if (legacyWebOsFetch) {
+    if (isLegacyWebOsBrowser()) {
       const result = await requestXtreamThroughWebOsService(action, extra, timeoutMs, controller.signal);
       const status = Number(result.statusCode) || 0;
       if (status === 511) throw new Error(describe511FromService(result, credentials.base));
@@ -2386,6 +2412,7 @@ function renderCategorySettings(): void {
 }
 
 function monitorScreenLoad(work: Promise<unknown>, message: string): void {
+  if (providerPreloadActive) return;
   const generation = ++screenLoadingGeneration;
   window.clearTimeout(screenLoadingTimer);
   screenLoadingTimer = 0;
@@ -2549,10 +2576,14 @@ async function saveCatalogSnapshot(key: string): Promise<void> {
 async function loadMoviesAndSeries(key: string, generation: number): Promise<void> {
   const warnings: string[] = [];
   if (!credentials || generation !== providerLoadGeneration) return;
-  stateLabel.textContent = 'Loading movies and series in the background…';
-  libraryMessage.textContent = 'Loading movies and series in the background…';
-  libraryMessage.classList.remove('hidden', 'error');
-  libraryMessage.classList.add('loading');
+  if (providerPreloadActive) {
+    setProgress('Loading movie and series categories…');
+  } else {
+    stateLabel.textContent = 'Loading movies and series in the background…';
+    libraryMessage.textContent = 'Loading movies and series in the background…';
+    libraryMessage.classList.remove('hidden', 'error');
+    libraryMessage.classList.add('loading');
+  }
   const [movieCategoryResult, seriesCategoryResult] = await Promise.all([
     settle(api<Category[]>('get_vod_categories', {}, 120_000)),
     settle(api<Category[]>('get_series_categories', {}, 120_000))
@@ -2565,6 +2596,7 @@ async function loadMoviesAndSeries(key: string, generation: number): Promise<voi
   categoryDropdownWidthReady = true;
   if (currentPage === 'movies' || currentPage === 'series') updateCatalogHeading();
   if (!credentials || generation !== providerLoadGeneration) return;
+  if (providerPreloadActive) setProgress('Loading movies and series…');
   const [movieResult, seriesResult] = await Promise.all([
     settle(api<Movie[]>('get_vod_streams', {}, 180_000)),
     settle(api<Series[]>('get_series', {}, 180_000))
@@ -2575,6 +2607,7 @@ async function loadMoviesAndSeries(key: string, generation: number): Promise<voi
   if (seriesResult.status === 'fulfilled' && Array.isArray(seriesResult.value)) series = seriesResult.value.filter((item) => item && item.series_id !== undefined && item.name);
   else warnings.push('series unavailable');
   if (!credentials || generation !== providerLoadGeneration) return;
+  if (providerPreloadActive) setProgress('Saving your library…');
   await saveCatalogSnapshot(key);
   void pruneRebuildableCaches().catch(() => undefined);
   if (!librarySection.classList.contains('hidden')) {
@@ -2599,6 +2632,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
   catalogBackgroundLoad = null;
   for (const controller of requestControllers) controller.abort();
   requestControllers.clear();
+  beginProviderPreload();
   setBusy(true);
   setProgress('Checking provider URL…');
   let cache: CachedCatalog | null = null;
@@ -2705,6 +2739,25 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     channels = channelResponse.filter((channel) => channel && channel.stream_id !== undefined && channel.name);
     if (!channels.length) throw new Error('The provider account has no live channels.');
 
+    if (providerPreloadActive && sourceType === 'xtream') {
+      setProgress('Live TV loaded. Preparing movies and series…');
+      await saveCatalogSnapshot(cacheKey);
+      if (generation !== providerLoadGeneration) return;
+      const backgroundLoad = loadMoviesAndSeries(cacheKey, generation);
+      catalogBackgroundLoad = backgroundLoad;
+      try {
+        await backgroundLoad;
+      } catch {
+        libraryMessage.textContent = 'Live TV loaded. Some movie or series data could not be loaded.';
+      }
+      if (generation !== providerLoadGeneration) return;
+      if (catalogBackgroundLoad === backgroundLoad) catalogBackgroundLoad = null;
+      passwordInput.value = '';
+      showCatalog();
+      document.querySelector<HTMLButtonElement>('.nav-button[data-page="home"]')?.focus();
+      return;
+    }
+
     showCatalog();
     void saveCatalogSnapshot(cacheKey);
     passwordInput.value = '';
@@ -2736,7 +2789,10 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       stateLabel.textContent = 'Connection failed';
     }
   } finally {
-    if (generation === providerLoadGeneration) setBusy(false);
+    if (generation === providerLoadGeneration) {
+      setBusy(false);
+      finishProviderPreload();
+    }
   }
 }
 
@@ -3756,39 +3812,51 @@ video.addEventListener('error', () => {
 
 window.addEventListener('keydown', (event) => {
   const target = document.activeElement as HTMLElement | null;
-  const keyCode = event.key === 'ArrowLeft' ? 37 : event.key === 'ArrowUp' ? 38
-    : event.key === 'ArrowRight' ? 39 : event.key === 'ArrowDown' ? 40 : event.keyCode;
+  const keyName = (event.key || '').toLowerCase();
+  const keyCode = keyName === 'arrowleft' || keyName === 'left' ? 37 : keyName === 'arrowup' || keyName === 'up' ? 38
+    : keyName === 'arrowright' || keyName === 'right' ? 39 : keyName === 'arrowdown' || keyName === 'down' ? 40
+      : keyName === 'backspace' ? 8 : keyName === 'delete' || keyName === 'del' ? 46 : event.keyCode;
   const isArrow = [37, 38, 39, 40].includes(keyCode);
+  const isInputBackspace = !!editingInput && (keyName === 'backspace' || event.code === 'Backspace' || keyCode === 8);
+  const isInputDelete = !!editingInput && (keyName === 'delete' || keyName === 'del' || event.code === 'Delete' || keyCode === 46);
   const isOK = event.keyCode === 13 || event.keyCode === 23 || event.key === 'Enter' || event.key === ' ';
-  const isBack = event.keyCode === 461 || event.keyCode === 10009 || event.key === 'Escape'
-    || (event.key === 'Backspace' && !editingInput);
+  const isBack = event.keyCode === 461 || event.keyCode === 10009 || keyName === 'escape'
+    || keyName === 'browserback' || keyName === 'goback' || (keyName === 'backspace' && !editingInput);
 
   if (editingInput) {
-    if (event.key === 'Backspace' || keyCode === 8) {
+    if (isInputBackspace) {
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation();
       editInputCharacter(editingInput, true);
       return;
     }
-    if (event.key === 'Delete' || keyCode === 46) {
+    if (isInputDelete) {
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation();
       editInputCharacter(editingInput, false);
       return;
     }
     if (isBack) {
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation();
       endInputEditing();
       return;
     }
-    if (keyCode === 37 || keyCode === 39) {
+    if (isArrow) {
       event.preventDefault();
       event.stopPropagation();
-      moveInputCaret(editingInput, keyCode === 37 ? -1 : 1);
+      event.stopImmediatePropagation();
+      if (keyCode === 37 || keyCode === 39) {
+        moveInputCaret(editingInput, keyCode === 37 ? -1 : 1);
+      } else {
+        try { editingInput.setSelectionRange(keyCode === 38 ? 0 : editingInput.value.length, keyCode === 38 ? 0 : editingInput.value.length); }
+        catch { editingInput.focus(); }
+      }
       return;
     }
-    if (isArrow) return;
   }
 
   if (activeDropdown) {
@@ -3907,11 +3975,23 @@ window.addEventListener('keydown', (event) => {
     if (video.paused) void video.play().catch(() => { playerMessage.textContent = 'Playback could not resume.'; });
     else { video.pause(); saveWatchProgress(true); }
   }
-});
+}, true);
 
 window.addEventListener('keyup', (event) => {
+  if (editingInput) {
+    const keyName = (event.key || '').toLowerCase();
+    const isTextControlKey = [37, 38, 39, 40, 8, 46].includes(event.keyCode)
+      || ['arrowleft', 'arrowup', 'arrowright', 'arrowdown', 'left', 'up', 'right', 'down', 'backspace', 'delete'].includes(keyName)
+      || event.code === 'Backspace' || event.code === 'Delete';
+    if (isTextControlKey) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      return;
+    }
+  }
   if (event.keyCode === 37 || event.keyCode === 39 || event.key === 'ArrowLeft' || event.key === 'ArrowRight') stopSeekHold();
-});
+}, true);
 
 $('stay-button').addEventListener('click', closeExitPrompt);
 $('exit-button').addEventListener('click', exitApplication);

@@ -1,16 +1,16 @@
 {
   "id": "com.nextflix.iptv",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "type": "web",
   "title": "NextFlix",
-  "appDescription": "C9 networking test build. Chromium 53 Xtream requests use a bundled app-owned webOS service to avoid provider rejection of the packaged-app Origin.",
+  "appDescription": "C9 usability test build. Fixes text-edit key capture and shows startup loading progress until Xtream catalogs are ready on Chromium 53.",
   "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
   "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
   "rootRequired": false,
-  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.8_all.ipk",
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.9_all.ipk",
   "ipkHash": {
-    "sha256": "aea8fe6d073981dfa8c84780ab492153ceca26231955ed9df7f5fe35455672c9"
+    "sha256": "ffb93e2319fe902ab524fd1af9f191d98778561750acef0ddaabb57353a88607"
   },
-  "ipkSize": 66934,
-  "installedSize": 203715
+  "ipkSize": 67532,
+  "installedSize": 205331
 }
