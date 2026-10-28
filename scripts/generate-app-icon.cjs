@@ -63,17 +63,20 @@ function png(size) {
 
   const unit = size / 130;
   const p = (value) => value * unit;
+  // Draw the Violet F first so the N can overlap it slightly and read as one monogram.
+  rect(p(63), p(29), p(12), p(72), accent);
+  rect(p(63), p(29), p(55), p(12), accent);
+  rect(p(63), p(59), p(35), p(12), accent);
+
   // A bold, borderless NF monogram that remains visible when webOS applies its own icon mask.
   rect(p(20), p(29), p(11), p(72), white);
   rect(p(57), p(29), p(11), p(72), white);
   polygon([[p(28), p(29)], [p(40), p(29)], [p(67), p(87)], [p(67), p(101)], [p(56), p(101)]], white);
-  // Cut a small play-shaped window into the N's diagonal, then draw a smaller
-  // violet play mark inside it to match the selected Direction 03 concept.
-  polygon([[p(36), p(54)], [p(54), p(65)], [p(36), p(76)]], background);
-  polygon([[p(41), p(59)], [p(51), p(65)], [p(41), p(71)]], accent);
-  rect(p(75), p(29), p(12), p(72), accent);
-  rect(p(75), p(29), p(43), p(12), accent);
-  rect(p(75), p(59), p(35), p(12), accent);
+  // Cut a large play-shaped window into the N's diagonal, then draw a vibrant
+  // Violet play mark inside it. The larger negative-space notch keeps
+  // the play symbol legible at webOS launcher sizes.
+  polygon([[p(34), p(49)], [p(59), p(65)], [p(34), p(81)]], background);
+  polygon([[p(39), p(54)], [p(54), p(65)], [p(39), p(76)]], accent);
 
   const rows = Buffer.alloc(size * (1 + size * 4));
   for (let y = 0; y < size; y += 1) {
