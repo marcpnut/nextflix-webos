@@ -37,7 +37,12 @@ async function getJson(url: string): Promise<OmdbResponse> {
   const timeout = window.setTimeout(() => controller.abort(), 10_000);
   try {
     const response = await fetch(url, { headers: { Accept: 'application/json' }, signal: controller.signal });
-    if (!response.ok) throw new Error(`OMDb returned HTTP ${response.status}.`);
+    if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('OMDb rejected the API key. Check that it was copied correctly and that the key has been activated by email.');
+      }
+      throw new Error(`OMDb returned HTTP ${response.status}.`);
+    }
     return await response.json() as OmdbResponse;
   } catch (error) {
     if (error instanceof TypeError) throw new Error('The TV browser could not reach OMDb. Check the network and browser access.');
