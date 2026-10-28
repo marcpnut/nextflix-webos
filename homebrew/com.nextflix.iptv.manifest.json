@@ -7,7 +7,7 @@
   "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/largeIcon.png",
   "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
   "rootRequired": false,
-  "ipkUrl": "https://github.com/marcpnut/nextflix-webos/releases/download/v1.0.3/com.nextflix.iptv_1.0.3_all.ipk",
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.3_all.ipk",
   "ipkHash": {
     "sha256": "9022c3da2bf8553e1791d6fbf10079a644a2ad9413ef463ee4197a1b064118be"
   },
