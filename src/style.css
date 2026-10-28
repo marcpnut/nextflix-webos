@@ -105,15 +105,15 @@ select option { color: #fff; background: #1c1e27; }
 .search-label { flex: 0 1 220px; width: 220px; max-width: 220px; min-width: 0; }
 .quiet { background: transparent; }
 .channel-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 26px; }
-.channel-list-scroll { min-height: 0; }
+.channel-list-scroll { min-height: 0; padding: 10px; scroll-padding: 14px; }
 .app-content.live-channel-layout > #library.live-channel-layout { display: flex; flex: 1 1 auto; flex-direction: column; width: 100%; min-height: 0; }
 #library.live-channel-layout > .live-preview { flex: 0 0 min(36vh, 420px); min-height: 0; }
 #library.live-channel-layout > .library-heading { flex: 0 0 auto; }
 #library.live-channel-layout > .channel-list-scroll { flex: 1 1 auto; overflow: auto; overscroll-behavior: contain; }
 #library.live-channel-layout .channel-list { align-content: start; }
-.channel-card { display: flex; align-items: center; gap: 15px; min-height: 86px; text-align: left; padding: 12px 18px; overflow: hidden; }
+.channel-card { display: flex; align-items: center; gap: 15px; min-height: 86px; scroll-margin: 14px; text-align: left; padding: 12px 18px; overflow: hidden; }
 .channel-label-group { display: grid; gap: 5px; min-width: 0; }
-.media-card { display: flex; flex-direction: column; align-items: stretch; gap: 9px; min-width: 0; min-height: 480px; height: auto; padding: 10px; overflow: hidden; text-align: left; }
+.media-card { display: flex; flex-direction: column; align-items: stretch; gap: 9px; min-width: 0; min-height: 480px; height: auto; scroll-margin: 14px; padding: 10px; overflow: hidden; text-align: left; }
 .media-poster { display: block; width: 100%; max-width: 100%; min-width: 0; height: 380px; max-height: 380px; object-fit: cover; background: #1c1e27; }
 .media-card-title { display: block; flex: 0 1 auto; width: 100%; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; font-weight: 700; line-height: 1.2; }
 .media-card-meta { color: #a4a5b2; font-size: 14px; }
@@ -135,7 +135,7 @@ select option { color: #fff; background: #1c1e27; }
 .hero-actions button { min-width: 150px; }
 .home-row { margin: 0 0 36px; }
 .home-row h2 { margin: 0 0 16px; font-size: 25px; }
-.poster-row { display: flex; overflow-x: auto; padding: 8px 10px 18px; scroll-behavior: smooth; }
+.poster-row { display: flex; overflow-x: auto; padding: 12px 14px 22px; scroll-padding: 16px; scroll-behavior: smooth; }
 .poster-tile { flex: 0 0 200px; width: 200px; min-width: 200px; max-width: 200px; min-height: 300px; height: auto; display: flex; flex-direction: column; gap: 8px; margin: 0 24px 0 0; padding: 9px; overflow: hidden; text-align: left; }
 .poster-tile img { display: block; width: 90%; max-width: 100%; min-width: 0; height: 205px; margin: 0 auto; object-fit: cover; background: #323541; }
 .poster-tile span { display: block; width: 100%; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
