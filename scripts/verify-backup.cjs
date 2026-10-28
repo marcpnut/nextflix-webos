@@ -5,6 +5,7 @@ const ts = require('typescript');
 const { webcrypto } = require('node:crypto');
 
 globalThis.crypto = webcrypto;
+globalThis.window = { crypto: webcrypto };
 const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'backup.ts'), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
 const backupModule = { exports: {} };

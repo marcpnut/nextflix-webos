@@ -1,6 +1,6 @@
 {
   "name": "com.nextflix.iptv.network",
-  "version": "1.0.9",
+  "version": "2.0.0",
   "description": "Private NextFlix provider networking service",
   "main": "main.js",
   "license": "UNLICENSED"

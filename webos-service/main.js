@@ -57,7 +57,7 @@ function providerUrl(payload) {
   });
 }
 
-function sendProviderRequest(target, timeoutMs, redirectCount, callback) {
+function sendProviderRequest(target, timeoutMs, redirectCount, userAgent, callback) {
   var parsed = url.parse(target);
   var transport = parsed.protocol === 'https:' ? https : http;
   var completed = false;
@@ -72,7 +72,7 @@ function sendProviderRequest(target, timeoutMs, redirectCount, callback) {
     port: parsed.port || undefined,
     path: (parsed.pathname || '/') + (parsed.search || ''),
     method: 'GET',
-    headers: { Accept: '*/*' }
+    headers: { Accept: '*/*', 'User-Agent': userAgent }
   }, function (response) {
     var status = Number(response.statusCode) || 0;
     var location = response.headers.location;
@@ -91,7 +91,7 @@ function sendProviderRequest(target, timeoutMs, redirectCount, callback) {
         finish(new Error('Provider redirected to a different server; credentials were not forwarded.'));
         return;
       }
-      sendProviderRequest(nextTarget, timeoutMs, redirectCount + 1, callback);
+      sendProviderRequest(nextTarget, timeoutMs, redirectCount + 1, userAgent, callback);
       return;
     }
 
@@ -112,6 +112,8 @@ function sendProviderRequest(target, timeoutMs, redirectCount, callback) {
         statusCode: status,
         contentType: String(response.headers['content-type'] || ''),
         server: String(response.headers.server || ''),
+        via: String(response.headers.via || ''),
+        redirectCount: redirectCount,
         body: chunks.join(''),
         responseOrigin: parsed.protocol + '//' + parsed.host
       });
@@ -131,6 +133,8 @@ function sendBody(message, result) {
       statusCode: result.statusCode,
       contentType: result.contentType,
       server: result.server,
+      via: result.via,
+      redirectCount: result.redirectCount,
       responseOrigin: result.responseOrigin,
       body: result.body
     });
@@ -145,6 +149,8 @@ function sendBody(message, result) {
     statusCode: result.statusCode,
     contentType: result.contentType,
     server: result.server,
+    via: result.via,
+    redirectCount: result.redirectCount,
     responseOrigin: result.responseOrigin,
     chunked: true,
     requestId: id,
@@ -158,10 +164,11 @@ service.register('request', function (message) {
   var payload = message.payload || {};
   var target;
   var timeoutMs = Math.max(1000, Math.min(Number(payload.timeoutMs) || 60000, 180000));
+  var userAgent = String(payload.userAgent || 'Mozilla/5.0 (WebOS) NextFlix').replace(/[\r\n]/g, '').slice(0, 256);
   try { target = providerUrl(payload); }
   catch (error) { return fail(message, error.message || 'Invalid provider request.'); }
 
-  sendProviderRequest(target, timeoutMs, 0, function (error, result) {
+  sendProviderRequest(target, timeoutMs, 0, userAgent, function (error, result) {
     if (error) return fail(message, error.message || 'Provider request failed.');
     sendBody(message, result);
   });

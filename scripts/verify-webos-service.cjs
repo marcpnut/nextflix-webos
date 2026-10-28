@@ -9,6 +9,8 @@ const querystring = require('node:querystring');
 let serviceInstance;
 let currentBody = '{"user_info":{"auth":1,"status":"Active"}}';
 let lastRequestOptions;
+let mockStatus = 200;
+let mockHeaders = { 'content-type': 'application/json', server: 'nginx' };
 
 class MockService {
   constructor(id) {
@@ -32,8 +34,8 @@ function mockTransport() {
       request.end = () => {
         process.nextTick(() => {
           const response = new EventEmitter();
-          response.statusCode = 200;
-          response.headers = { 'content-type': 'application/json', server: 'nginx' };
+          response.statusCode = mockStatus;
+          response.headers = mockHeaders;
           response.setEncoding = () => {};
           response.resume = () => {};
           onResponse(response);
@@ -77,6 +79,7 @@ async function main() {
     base: 'http://provider.example:8080/prefix/',
     username: 'user+name',
     password: 'p/ss word',
+    userAgent: 'Mozilla/5.0 test C9',
     action: 'get_live_streams',
     extra: { category_id: '17' },
     timeoutMs: 60000
@@ -88,10 +91,24 @@ async function main() {
   assert.equal(lastRequestOptions.port, '8080');
   assert.equal(lastRequestOptions.path.startsWith('/prefix/player_api.php?'), true);
   assert.equal(lastRequestOptions.headers.Origin, undefined);
+  assert.equal(lastRequestOptions.headers['User-Agent'], 'Mozilla/5.0 test C9');
   const query = new URLSearchParams(lastRequestOptions.path.split('?')[1]);
   assert.equal(query.get('username'), 'user+name');
   assert.equal(query.get('password'), 'p/ss word');
   assert.equal(query.get('category_id'), '17');
+
+  mockStatus = 511;
+  mockHeaders = { 'content-type': 'application/json', server: 'provider-nginx', via: 'edge-proxy' };
+  currentBody = '{"message":"Network Authentication Required"}';
+  const deniedByNetwork = await invoke('request', 'com.nextflix.iptv', {
+    base: 'http://provider.example:8080', username: 'private-user', password: 'private-password', userAgent: 'C9 test', timeoutMs: 60000
+  });
+  assert.equal(deniedByNetwork.statusCode, 511);
+  assert.equal(deniedByNetwork.via, 'edge-proxy');
+  assert.equal(deniedByNetwork.redirectCount, 0);
+  assert.equal(JSON.stringify(deniedByNetwork).includes('private-password'), false);
+  mockStatus = 200;
+  mockHeaders = { 'content-type': 'application/json', server: 'nginx' };
 
   const denied = await invoke('request', 'unrelated.app', { base: 'http://provider.example', username: 'x', password: 'y' });
   assert.equal(denied.returnValue, false);

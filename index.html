@@ -35,7 +35,7 @@
             </div>
           </form>
           <div id="message" class="message" role="status" aria-live="polite"></div>
-          <p id="app-version" class="privacy-note">NextFlix 0.4.0 · waiting for app script</p>
+          <p id="app-version" class="privacy-note">NextFlix v2.0.0</p>
           <p class="privacy-note">When enabled, login details are saved in this app’s local storage on the TV. They are not encrypted or sent to NextFlix. They are sent to your IPTV provider when connecting and streaming.</p>
         </section>
 
@@ -105,6 +105,22 @@
                   <input id="backup-file" type="file" accept=".nextflix,.json,application/json" hidden />
                 </div>
                 <p id="backup-status" class="maintenance-status" role="status" aria-live="polite">Backups exclude cached artwork and rebuildable catalog data.</p>
+              </section>
+              <section class="maintenance-settings" aria-labelledby="sync-settings-title">
+                <h2 id="sync-settings-title">Catalog database &amp; synchronization</h2>
+                <p class="muted">Saved catalogs appear immediately on launch. Refresh runs while NextFlix is open; webOS does not guarantee a closed-app background task.</p>
+                <p id="sync-status" class="maintenance-status" role="status" aria-live="polite">Synchronization status will appear after a provider is connected.</p>
+                <div class="settings-actions sync-intervals">
+                  <label>Live TV<select id="live-refresh-interval"><option value="3">Every 3 hours</option><option value="6">Every 6 hours</option><option value="12">Every 12 hours</option><option value="24">Every 24 hours</option></select></label>
+                  <label>Movies<select id="movies-refresh-interval"><option value="3">Every 3 hours</option><option value="6">Every 6 hours</option><option value="12">Every 12 hours</option><option value="24">Every 24 hours</option></select></label>
+                  <label>Series<select id="series-refresh-interval"><option value="3">Every 3 hours</option><option value="6">Every 6 hours</option><option value="12">Every 12 hours</option><option value="24">Every 24 hours</option></select></label>
+                  <button id="refresh-catalogs">Refresh Now</button>
+                </div>
+              </section>
+              <section class="maintenance-settings" aria-labelledby="about-title">
+                <h2 id="about-title">About NextFlix</h2>
+                <p id="about-version" class="maintenance-status">NextFlix v2.0.0</p>
+                <p class="muted">One universal webOS app for compatible LG televisions. Your provider account and viewing data stay on this TV.</p>
               </section>
               <section class="maintenance-settings" aria-labelledby="diagnostics-title">
                 <h2 id="diagnostics-title">Diagnostics and cache</h2>

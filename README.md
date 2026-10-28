@@ -1,8 +1,8 @@
-# NextFlix — Version 1.0.22
+# NextFlix — Version 2.0.0
 
 Lightweight IPTV player for LG webOS. The single app package targets Chromium 53 for older webOS 4.x TVs and remains compatible with newer webOS releases.
 
-On webOS Chromium 53, Xtream requests use a bundled app-owned JavaScript service so the browser's packaged-app Origin header does not cause provider login failures. Catalogs are cached locally and reused for 24 hours for both startup and manual Connect; stale catalogs are shown while refreshed. Text fields use native browser/webOS input behavior without app-level key interception. Player controls schedule their five-second hide on playback start and resume, and remain visible while paused. Other browsers keep the direct fetch path. The service uses ordinary HTTP/HTTPS, does not disable TLS verification, and never logs credentials or complete authenticated URLs. Large provider responses are transferred to the app in bounded chunks.
+On webOS Chromium 53, Xtream requests use a bundled app-owned JavaScript service so the browser's packaged-app Origin header does not affect provider login. It forwards the app browser User-Agent without sending an Origin header, allows only same-server redirects, uses ordinary HTTP/HTTPS, and never logs credentials or complete authenticated URLs. Catalogs are stored in persistent IndexedDB and displayed immediately; independent Live TV, Movies, and Series refreshes run in the background on app launch/resume and use configurable 6/12-hour defaults. Large provider responses are transferred in bounded chunks. The package keeps the same app ID for in-place updates.
 
 ## App artwork preview
 
@@ -17,7 +17,7 @@ On webOS Chromium 53, Xtream requests use a bundled app-owned JavaScript service
 - Save the provider login explicitly with **Save login**, and save it again before connecting when remembering is enabled.
 - Show connection progress in both the form and top bar while requests are pending.
 - Reconnect automatically at launch when a login is saved.
-- Show a cached live-channel catalogue immediately and refresh it in the background when it is at least 24 hours old.
+- Show saved Live TV, Movies, and Series immediately and refresh stale datasets in the background.
 - Show the running app version on the setup screen.
 - Validate the account and load live categories/channels.
 - Allow up to 60 seconds for login, 90 seconds for categories, and 180 seconds for the channel list.
@@ -62,13 +62,13 @@ On webOS Chromium 53, Xtream requests use a bundled app-owned JavaScript service
 - Use locally stored playback progress only; no stream URLs or provider credentials are stored in watch history.
 - Export and restore app settings in an AES-GCM encrypted backup using a password-derived key. Backups include saved provider settings, profiles, favorites, category visibility, and history; rebuildable catalog data is excluded.
 - Inspect app/browser, playback probes, local settings size, and IndexedDB cache counts in Settings. Clear only rebuildable catalog caches without clearing profiles or viewing data.
-- Prune catalog snapshots older than 14 days and retain at most two after a catalog refresh.
+- Retain catalog metadata, sync status, episode lists, and mirrored settings in a versioned IndexedDB database. Prune stale rebuildable catalog snapshots after 90 days.
 - Optionally enrich VOD details through a user-provided TMDB API key and search external subtitles through a user-provided OpenSubtitles API consumer key.
 - Check public GitHub Releases on demand. NextFlix never installs an update automatically.
 - Navigate with directional remote keys and get focus return when closing title details.
 - Require three Back presses on Home before showing the exit confirmation; Back closes the player or returns to Home from a subpage.
 
-When “Remember this login on this TV” is enabled, credentials are stored in the app's local storage without encryption so the app can reconnect on launch. They are not sent to NextFlix or logged; provider requests and stream URLs necessarily carry credentials to your IPTV provider. Uncheck the option to remove the saved login. Do not use a provider you are not authorized to access.
+When “Remember this login on this TV” is enabled, credentials are stored in the TV app's IndexedDB settings database, scoped to NextFlix's application origin. This is persistent app storage, not an OS credential vault, and webOS does not encrypt it at rest. Credentials are never logged or sent to NextFlix; provider requests and stream URLs carry credentials only to the configured IPTV service. Uncheck the option to remove the saved login. Use only an authorized IPTV provider.
 
 ## Build
 
@@ -97,11 +97,17 @@ The GitHub repository must be public for the TV's Homebrew Channel to download t
 
 For a local-only provider test build, copy `.env.local.example` to `.env.local` and fill in the test provider URL, username, and password. Plain `pnpm build` embeds these values in `dist/`, so **never publish or upload its output**. The `.env.local` file is ignored by Git. Use `pnpm package` for the public release build.
 
+## v2.0.0 platform constraints
+
+- Normal packaged webOS apps have no supported SQLite service/API. NextFlix uses transactional, versioned IndexedDB stores compatible with the C9's Chromium 53-era app runtime and newer Nano webOS.
+- webOS does not guarantee app execution at TV boot or while NextFlix is closed. Catalog refresh therefore runs on app launch/resume, network recovery, and periodically while the app stays open; no boot scripts or protected system partitions are changed.
+- HTTP 511 on the C9 was observed from an nginx response. v2.0.0 adds browser User-Agent parity to the C9 network service and richer redacted diagnostics. The provider/network response still needs verification on the physical C9; the app does not bypass authentication or disable TLS checks.
+
 ## Current limitations
 
 - Provider CORS rules can block `player_api.php` requests in the TV app.
 - Codec and stream compatibility vary by provider and TV. The user has confirmed Live TV, Movies, and Series playback on the target TV. The Phase 3 interface still needs TV testing.
-- The channel cache uses IndexedDB and stores rebuildable provider catalogue data, not IPTV credentials. If IndexedDB is unavailable, the app still connects but cannot show the catalogue offline.
+- If IndexedDB is unavailable, the app still connects but cannot provide offline catalog storage or persistent database synchronization.
 - Remembered credentials use unencrypted app local storage on the TV. The password is visible in this test build.
 - This project targets one IPTV provider at a time; multi-provider merging is intentionally out of scope.
 - External subtitle search and WebVTT playback are implemented but still need verification on the LG TV; source failover and local pairing are not implemented.
@@ -132,9 +138,11 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - [x] Phase 6 implementation: local viewer profiles, profile-scoped favorites/subtitle preferences/watch history, and local recommendations.
 - [ ] Phase 6 TV validation: create and switch profiles, confirm favorites and resume history remain separate, and verify subtitle preference persistence.
 - [x] Phase 7 implementation: password-encrypted settings backup/restore, rebuildable cache cleanup, local diagnostics, and an on-demand manual release check.
-- [x] Phase 7 storage safeguard: bound rebuildable IndexedDB snapshots to two catalogs, pruning entries older than 14 days.
+- [x] Phase 7 storage safeguard (v1): IndexedDB catalog cleanup; v2.0.0 extends the retention window to 90 days.
 - [ ] Phase 7 TV validation: verify backup file export/import and passphrase handling, cache cleanup preserves profiles/history, diagnostics report gracefully, and the optional release check works on TV.
 - [ ] Phase 7 feasibility item: local phone pairing/LAN transfer remains unavailable to ordinary packaged apps without a listener service; keep manual entry and encrypted backup as the safe alternatives.
 - [x] Phase 8 local gate: rebuild and package 1.0.0 before release.
 - [ ] Phase 8 TV gate: verify 1.0.0 player navigation, subtitle overlays, TV scroll arrows, focus visibility at all grid edges, metadata, and external subtitle behavior on the LG.
+- [x] v2.0.0 local implementation: persistent catalog database, separate catalog sync state, retained cached catalogs after failed/empty refreshes, episode cache, manual/interval controls, provider credential IndexedDB verification, and redacted C9 network diagnostics.
+- [ ] v2.0.0 TV validation: install over v1.0.23, confirm credentials/catalogs survive reboot, verify background refresh behavior and subtitle menu on C9 and Nano, and retest playback on both.
 

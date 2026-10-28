@@ -5,6 +5,11 @@ import { createAbortController } from './platform/abort';
 import {
   readCatalog,
   writeCatalog,
+  readSeriesEpisodes,
+  writeSeriesEpisodes,
+  writeDatabaseSetting,
+  markCatalogSyncAttempt,
+  type CatalogDataset,
   pruneRebuildableCaches,
   getRebuildableCacheCounts,
   clearRebuildableCaches,
@@ -120,6 +125,10 @@ const backupFileInput = $('backup-file') as HTMLInputElement;
 const backupStatus = $('backup-status');
 const diagnosticsSummary = $('diagnostics-summary');
 const cacheStatus = $('cache-status');
+const syncStatus = $('sync-status');
+const liveRefreshInterval = $('live-refresh-interval') as HTMLSelectElement;
+const moviesRefreshInterval = $('movies-refresh-interval') as HTMLSelectElement;
+const seriesRefreshInterval = $('series-refresh-interval') as HTMLSelectElement;
 const updateStatus = $('update-status');
 const releaseLink = $('release-link') as HTMLAnchorElement;
 const tmdbKeyInput = $('tmdb-api-key') as HTMLInputElement;
@@ -156,11 +165,13 @@ const nextEpisodeCancelButton = $('next-episode-cancel') as HTMLButtonElement;
 
 const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
-const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_REFRESH_HOURS: Record<CatalogDataset, number> = { live: 6, movies: 12, series: 12 };
+const REFRESH_INTERVAL_KEY = 'nextflix-refresh-intervals-v2';
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.22';
+const APP_VERSION = '2.0.0';
 const versionLabel = $('app-version');
-versionLabel.textContent = `NextFlix ${APP_VERSION}`;
+versionLabel.textContent = `NextFlix v${APP_VERSION}`;
+$('about-version').textContent = `NextFlix v${APP_VERSION} · App ID ${'com.nextflix.iptv'}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
 let credentials: { base: string; username: string; password: string } | null = null;
 let playbackBase: string | null = null;
@@ -216,6 +227,15 @@ function settle<T>(promise: Promise<T>): Promise<SettledResult<T>> {
     (value) => ({ status: 'fulfilled', value }),
     (reason: unknown) => ({ status: 'rejected', reason })
   );
+}
+function uniqueById<T>(items: T[], getId: (item: T) => string | number | undefined): T[] {
+  const seen: Record<string, boolean> = Object.create(null) as Record<string, boolean>;
+  return items.filter((item) => {
+    const id = getId(item);
+    if (id === undefined || id === null || seen[String(id)]) return false;
+    seen[String(id)] = true;
+    return true;
+  });
 }
 const LEGACY_OMDB_API_KEY = 'nextflix.omdb-api-key.v1';
 const OPENSUBTITLES_KEY = 'nextflix.opensubtitles-key.v1';
@@ -280,6 +300,9 @@ let activeDropdown: DropdownControl | null = null;
 let focusedDropdownOption = 0;
 const dropdownControls = new Map<HTMLSelectElement, DropdownControl>();
 let preferredSubtitleLanguages = ['nl'];
+let refreshIntervals: Record<CatalogDataset, number> = { ...DEFAULT_REFRESH_HOURS };
+let catalogSyncRunning = false;
+let catalogSyncTimer = 0;
 let manualSubtitleTrack: SubtitleTrackChoice | null | 'off' = null;
 let openTrackMenu = false;
 let focusedTrackOptionIndex = 0;
@@ -297,6 +320,7 @@ function setAppTheme(theme: AppTheme, persist = false): void {
   );
   if (persist) {
     try { localStorage.setItem(THEME_PREFERENCE_KEY, selected); } catch { /* The theme remains active for this session. */ }
+    void writeDatabaseSetting(THEME_PREFERENCE_KEY, selected).catch(() => undefined);
   }
 }
 
@@ -380,33 +404,27 @@ function readSavedProvider(): SavedProvider | null {
 async function readSavedProviderDurable(): Promise<SavedProvider | null> {
   try {
     const saved = parseSavedProvider(await readProviderRecord());
-    if (saved) {
-      try { localStorage.setItem(REMEMBERED_PROVIDER_KEY, JSON.stringify(saved)); } catch { /* IndexedDB remains the durable copy. */ }
-      return saved;
-    }
+    if (saved) return saved;
   } catch { /* Fall back to the legacy localStorage copy. */ }
   return readSavedProvider();
 }
 
 async function saveProvider(saved: SavedProvider): Promise<boolean> {
-  const serialized = JSON.stringify(saved);
-  let localSaved = false;
-  try {
-    localStorage.setItem(REMEMBERED_PROVIDER_KEY, serialized);
-    localSaved = localStorage.getItem(REMEMBERED_PROVIDER_KEY) === serialized;
-  } catch { /* Try the separate IndexedDB store used by the C9 catalog cache. */ }
-  let indexedDbSaved = false;
   try {
     await writeProviderRecord(saved);
     const stored = parseSavedProvider(await readProviderRecord());
-    indexedDbSaved = !!stored
+    const verified = !!stored
       && stored.base === saved.base
       && stored.username === saved.username
       && stored.password === saved.password
       && stored.format === saved.format
       && stored.kind === saved.kind;
-  } catch { /* A confirmed localStorage write can still be used. */ }
-  return localSaved || indexedDbSaved;
+    if (verified) {
+      // Drop the legacy duplicate once the durable IndexedDB record is verified.
+      try { localStorage.removeItem(REMEMBERED_PROVIDER_KEY); } catch { /* The IndexedDB record is authoritative. */ }
+    }
+    return verified;
+  } catch { return false; }
 }
 
 async function saveCurrentProvider(): Promise<boolean> {
@@ -535,6 +553,8 @@ type XtreamServiceReply = {
   statusCode?: number;
   contentType?: string;
   server?: string;
+  via?: string;
+  redirectCount?: number;
   responseOrigin?: string;
   body?: string;
   chunked?: boolean;
@@ -602,6 +622,7 @@ async function requestXtreamThroughWebOsService(
     base: credentials.base,
     username: credentials.username,
     password: credentials.password,
+    userAgent: navigator.userAgent,
     action: action ?? '',
     extra,
     timeoutMs
@@ -628,7 +649,7 @@ async function requestXtreamThroughWebOsService(
 
 function describe511FromService(result: XtreamServiceReply, requestBase: string): string {
   const body = sanitized511Body(result.body ?? '');
-  return `HTTP 511 diagnostic · App ${APP_VERSION} · Browser ${navigator.userAgent.slice(0, 200)} · Request host ${safeOrigin(requestBase)} · Response host ${safeOrigin(result.responseOrigin ?? requestBase)} · Redirected no · Content-Type ${(result.contentType ?? 'unavailable').slice(0, 160)} · Server ${(result.server ?? 'unavailable').slice(0, 160)} · Via unavailable · Response: ${body || '[empty]'}`;
+  return `HTTP 511 diagnostic · App ${APP_VERSION} · Browser ${navigator.userAgent.slice(0, 200)} · Request host ${safeOrigin(requestBase)} · Response host ${safeOrigin(result.responseOrigin ?? requestBase)} · Redirects ${Number(result.redirectCount) || 0} · Content-Type ${(result.contentType ?? 'unavailable').slice(0, 160)} · Server ${(result.server ?? 'unavailable').slice(0, 160)} · Via ${(result.via ?? 'unavailable').slice(0, 160)} · Response: ${body || '[empty]'}`;
 }
 
 async function api<T>(action?: string, extra: Record<string, string> = {}, timeoutMs = 60_000): Promise<T> {
@@ -1044,7 +1065,9 @@ function renderLanguageFilter(): void {
 function applyLanguageFilter(): void {
   const view = selectedLanguageView();
   activeLanguageFilters[view] = languageSelect.value;
-  try { localStorage.setItem(languageFilterKey, JSON.stringify(activeLanguageFilters)); } catch { /* Session-only filter selection. */ }
+  const languageValue = JSON.stringify(activeLanguageFilters);
+  try { localStorage.setItem(languageFilterKey, languageValue); } catch { /* Session-only filter selection. */ }
+  void writeDatabaseSetting(languageFilterKey, languageValue).catch(() => undefined);
   if (view === 'movies' || view === 'series') catalogPages[view] = 1;
   if (currentPage === 'settings') {
     renderCategorySettings();
@@ -1069,13 +1092,13 @@ function isCategoryVisible(view: CatalogView, categoryId: string | number | unde
 }
 
 function saveHiddenCategories(): void {
-  try {
-    localStorage.setItem(hiddenCategoriesKey, JSON.stringify({
+  const value = JSON.stringify({
       live: Array.from(hiddenCategoryIds.live),
       movies: Array.from(hiddenCategoryIds.movies),
       series: Array.from(hiddenCategoryIds.series)
-    }));
-  } catch { /* Category visibility remains session-local if storage is unavailable. */ }
+    });
+  try { localStorage.setItem(hiddenCategoriesKey, value); } catch { /* Category visibility remains in memory. */ }
+  void writeDatabaseSetting(hiddenCategoriesKey, value).catch(() => undefined);
 }
 
 function loadHiddenCategories(key: string): void {
@@ -1123,7 +1146,9 @@ function loadWatchHistory(): void {
 }
 
 function persistWatchHistory(): void {
-  try { localStorage.setItem(WATCH_HISTORY_KEY, JSON.stringify(watchHistory)); } catch { /* Resume data stays in memory if storage is full. */ }
+  const value = JSON.stringify(watchHistory);
+  try { localStorage.setItem(WATCH_HISTORY_KEY, value); } catch { /* Resume data stays in memory if storage is full. */ }
+  void writeDatabaseSetting(WATCH_HISTORY_KEY, value).catch(() => undefined);
 }
 
 function migrateLegacyWatchHistory(cacheKey: string): void {
@@ -1168,7 +1193,9 @@ function initializeProfiles(): void {
 }
 
 function saveProfiles(): void {
-  try { localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles)); } catch { /* Existing profiles remain available for this session. */ }
+  const value = JSON.stringify(profiles);
+  try { localStorage.setItem(PROFILES_KEY, value); } catch { /* Existing profiles remain available for this session. */ }
+  void writeDatabaseSetting(PROFILES_KEY, value).catch(() => undefined);
 }
 
 function loadFavoritesForProfile(migrateLegacy = false): void {
@@ -1234,6 +1261,7 @@ function switchProfile(profileId: string): void {
   activeProfileId = profile.id;
   activeProfileLabel.textContent = profile.name;
   try { localStorage.setItem(ACTIVE_PROFILE_KEY, profile.id); } catch { /* Current profile remains active for this session. */ }
+  void writeDatabaseSetting(ACTIVE_PROFILE_KEY, profile.id).catch(() => undefined);
   watchScope = catalogCacheKey ? profileScopeForCatalog(catalogCacheKey, profile.id) : profile.id;
   loadFavoritesForProfile();
   loadTrackPreferencesForProfile(profile.id);
@@ -1272,7 +1300,7 @@ function addViewerProfile(): void {
   switchProfile(profile.id);
 }
 
-function collectSettingsBackup(): BackupPayload {
+async function collectSettingsBackup(): Promise<BackupPayload> {
   const values: Record<string, string> = {};
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
@@ -1281,13 +1309,15 @@ function collectSettingsBackup(): BackupPayload {
       if (value !== null) values[key] = value;
     }
   }
+  const provider = parseSavedProvider(await readProviderRecord());
+  if (provider) values[REMEMBERED_PROVIDER_KEY] = JSON.stringify(provider);
   return { format: 'nextflix-settings', schemaVersion: 1, createdAt: new Date().toISOString(), values };
 }
 
 async function exportSettingsBackup(): Promise<void> {
   backupStatus.textContent = 'Encrypting backup on this device…';
   try {
-    const payload = collectSettingsBackup();
+    const payload = await collectSettingsBackup();
     const blob = await encryptBackup(payload, backupPasswordInput.value);
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -1305,7 +1335,7 @@ async function exportSettingsBackup(): Promise<void> {
   }
 }
 
-function replaceSettingsFromBackup(values: Record<string, string>): void {
+async function replaceSettingsFromBackup(values: Record<string, string>): Promise<void> {
   const previous: Record<string, string> = {};
   for (let index = 0; index < localStorage.length; index += 1) {
     const key = localStorage.key(index);
@@ -1325,6 +1355,13 @@ function replaceSettingsFromBackup(values: Record<string, string>): void {
   try {
     clearNextFlixSettings();
     Object.entries(values).forEach(([key, value]) => localStorage.setItem(key, value));
+    const savedProvider = values[REMEMBERED_PROVIDER_KEY];
+    if (savedProvider) {
+      const provider = parseSavedProvider(JSON.parse(savedProvider));
+      if (provider) await writeProviderRecord(provider);
+    } else {
+      await removeProviderRecord();
+    }
   } catch (error) {
     try {
       clearNextFlixSettings();
@@ -1345,7 +1382,7 @@ async function restoreSettingsBackup(file: File): Promise<void> {
       backupStatus.textContent = 'Restore cancelled. Your current settings are unchanged.';
       return;
     }
-    replaceSettingsFromBackup(payload.values);
+    await replaceSettingsFromBackup(payload.values);
     backupStatus.textContent = 'Backup restored. NextFlix will reload to apply the saved profiles and provider settings.';
     window.setTimeout(() => window.location.reload(), 900);
   } catch (error) {
@@ -1735,10 +1772,11 @@ function showTrackMenu(): void {
   if (!tracks.length && !opensubtitlesKey) playerMessage.textContent = 'No selectable subtitles found. Add an OpenSubtitles.com API key in Settings to search online.';
   focusedTrackOptionIndex = 0;
   openTrackMenu = true;
-  renderTrackMenu();
   trackMenu.classList.remove('hidden');
+  renderTrackMenu();
   window.clearTimeout(playerControlsHideTimer);
   playerControlsHideTimer = 0;
+  trackOptions.querySelector<HTMLButtonElement>('.track-option')?.focus();
   if (!tracks.length) void findOnlineSubtitles();
 }
 
@@ -1813,7 +1851,10 @@ function startEpisodeCountdown(): void {
 function saveTrackPreferences(): void {
   preferredSubtitleLanguages = subtitleLanguagePreferencesInput.value ? [subtitleLanguagePreferencesInput.value] : [];
   try {
-    localStorage.setItem(profileStorageKey(TRACK_PREFERENCES_KEY), JSON.stringify({ subtitles: preferredSubtitleLanguages }));
+    const key = profileStorageKey(TRACK_PREFERENCES_KEY);
+    const value = JSON.stringify({ subtitles: preferredSubtitleLanguages });
+    localStorage.setItem(key, value);
+    void writeDatabaseSetting(key, value).catch(() => undefined);
   } catch { /* Track preferences remain active for this session. */ }
   manualSubtitleTrack = null;
   applyPreferredTracks();
@@ -1929,7 +1970,10 @@ function favoriteKey(kind: 'movie' | 'series', id: number | string): string {
 }
 
 function saveFavorites(): void {
-  try { localStorage.setItem(profileStorageKey(FAVORITES_KEY), JSON.stringify(Array.from(favorites))); } catch { /* Keep favorites in memory for this session. */ }
+  const key = profileStorageKey(FAVORITES_KEY);
+  const value = JSON.stringify(Array.from(favorites));
+  try { localStorage.setItem(key, value); } catch { /* Keep favorites in memory for this session. */ }
+  void writeDatabaseSetting(key, value).catch(() => undefined);
 }
 
 function toggleFavorite(kind: 'movie' | 'series', id: number | string): void {
@@ -2073,6 +2117,7 @@ function renderHomePlaylistSettings(): void {
       }).map((entry) => entry.id);
       try { localStorage.setItem(HOME_PLAYLIST_SETTINGS_KEY, JSON.stringify(selectedHomePlaylists)); }
       catch { homePlaylistStatus.textContent = 'The selection is active for this session but could not be saved on this TV.'; }
+      void writeDatabaseSetting(HOME_PLAYLIST_SETTINGS_KEY, JSON.stringify(selectedHomePlaylists)).catch(() => undefined);
       renderTmdbHomeRows();
       if (currentPage === 'home') void refreshHomePlaylists();
     });
@@ -2424,6 +2469,7 @@ function showPage(page: AppPage): void {
     updateCatalogHeading();
     renderChannels();
   }
+  if (page === 'settings') void renderSyncStatus();
   if (page === 'home') renderHome();
   if (page === 'settings') renderCategorySettings();
   if (page === 'settings') void refreshDiagnostics();
@@ -2557,14 +2603,15 @@ async function loadMoviesAndSeries(key: string, generation: number): Promise<voi
   if (currentPage === 'movies' || currentPage === 'series') updateCatalogHeading();
   if (!credentials || generation !== providerLoadGeneration) return;
   if (providerPreloadActive) setProgress('Loading movies and series…');
-  const [movieResult, seriesResult] = await Promise.all([
-    settle(api<Movie[]>('get_vod_streams', {}, 180_000)),
-    settle(api<Series[]>('get_series', {}, 180_000))
-  ]);
+  // Providers often return large complete catalogs. Keep only one large JSON
+  // response in flight at once on the C9's constrained memory budget.
+  const movieResult = await settle(api<Movie[]>('get_vod_streams', {}, 180_000));
   if (!credentials || generation !== providerLoadGeneration) return;
-  if (movieResult.status === 'fulfilled' && Array.isArray(movieResult.value)) movies = movieResult.value.filter((item) => item && item.stream_id !== undefined && item.name);
+  const seriesResult = await settle(api<Series[]>('get_series', {}, 180_000));
+  if (!credentials || generation !== providerLoadGeneration) return;
+  if (movieResult.status === 'fulfilled' && Array.isArray(movieResult.value)) movies = uniqueById(movieResult.value.filter((item) => item && item.stream_id !== undefined && item.name), (item) => item.stream_id);
   else warnings.push('movies unavailable');
-  if (seriesResult.status === 'fulfilled' && Array.isArray(seriesResult.value)) series = seriesResult.value.filter((item) => item && item.series_id !== undefined && item.name);
+  if (seriesResult.status === 'fulfilled' && Array.isArray(seriesResult.value)) series = uniqueById(seriesResult.value.filter((item) => item && item.series_id !== undefined && item.name), (item) => item.series_id);
   else warnings.push('series unavailable');
   if (!credentials || generation !== providerLoadGeneration) return;
   if (providerPreloadActive) setProgress('Saving your library…');
@@ -2587,6 +2634,154 @@ async function loadMoviesAndSeries(key: string, generation: number): Promise<voi
   stateLabel.textContent = 'Connected';
 }
 
+function loadRefreshIntervals(): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem(REFRESH_INTERVAL_KEY) ?? '{}') as Partial<Record<CatalogDataset, unknown>>;
+    (['live', 'movies', 'series'] as CatalogDataset[]).forEach((dataset) => {
+      const value = Number(saved[dataset]);
+      if ([3, 6, 12, 24].includes(value)) refreshIntervals[dataset] = value;
+    });
+  } catch { /* use conservative defaults */ }
+  liveRefreshInterval.value = String(refreshIntervals.live);
+  moviesRefreshInterval.value = String(refreshIntervals.movies);
+  seriesRefreshInterval.value = String(refreshIntervals.series);
+}
+
+function refreshIntervalMs(dataset: CatalogDataset): number {
+  return refreshIntervals[dataset] * 60 * 60 * 1000;
+}
+
+function isDatasetDue(dataset: CatalogDataset, state: CachedCatalog['syncState'], force: boolean): boolean {
+  if (force) return true;
+  const record = state?.[dataset];
+  const retryCount = record?.retryCount ?? 0;
+  if (retryCount > 0 && record?.lastError) {
+    const backoff = Math.min(6 * 60 * 60 * 1000, 5 * 60 * 1000 * Math.pow(2, Math.min(retryCount - 1, 6)));
+    if (Date.now() - (record.lastAttemptAt ?? 0) < backoff) return false;
+  }
+  return !record?.lastSuccessAt || Date.now() - record.lastSuccessAt >= refreshIntervalMs(dataset);
+}
+
+function formatSyncTime(value?: number): string {
+  return value ? new Date(value).toLocaleString() : 'Never';
+}
+
+function safeProviderError(error: unknown): string {
+  let text = error instanceof Error ? error.message : String(error || 'Synchronization failed.');
+  if (credentials) {
+    [credentials.password, credentials.username, credentials.base].filter(Boolean).forEach((secret) => {
+      [secret, encodeURIComponent(secret)].forEach((variant) => {
+        if (variant) text = text.split(variant).join('[redacted]');
+      });
+    });
+  }
+  return text.replace(/[\r\n\t]+/g, ' ').slice(0, 200);
+}
+
+async function renderSyncStatus(key = catalogCacheKey): Promise<void> {
+  if (!key) { syncStatus.textContent = 'Connect a provider to view catalog synchronization.'; return; }
+  try {
+    const cache = await readCatalog(key);
+    const state = cache?.syncState ?? {};
+    const lines = (['live', 'movies', 'series'] as CatalogDataset[]).map((dataset) => {
+      const entry = state[dataset];
+      const label = dataset === 'live' ? 'Live TV' : dataset === 'movies' ? 'Movies' : 'Series';
+      return `${label}: last successful sync ${formatSyncTime(entry?.lastSuccessAt)}${entry?.lastError ? ` · error: ${entry.lastError}` : ''}`;
+    });
+    syncStatus.textContent = `IndexedDB catalog database · ${cache ? 'available' : 'no saved catalog'}\n${lines.join('\n')}`;
+  } catch (error) {
+    syncStatus.textContent = error instanceof Error ? `Database unavailable: ${error.message}` : 'Database unavailable.';
+  }
+}
+
+async function syncCatalogDatasets(key: string, generation: number, force = false): Promise<void> {
+  if (catalogSyncRunning || !credentials || sourceType !== 'xtream' || !navigator.onLine) return;
+  catalogSyncRunning = true;
+  try {
+    const cache = await readCatalog(key);
+    const state = cache?.syncState ?? {};
+    const due = (['live', 'movies', 'series'] as CatalogDataset[]).filter((dataset) => isDatasetDue(dataset, state, force));
+    if (!due.length || generation !== providerLoadGeneration) return;
+    stateLabel.textContent = 'Refreshing catalog in the background…';
+    await Promise.all(due.map((dataset) => markCatalogSyncAttempt(key, dataset)));
+    try {
+      const auth = await api<XtreamAuth>(undefined, {}, 60_000);
+      assertAuthenticated(auth);
+      if (generation !== providerLoadGeneration) return;
+      playbackBase = providerPlaybackServer(auth, credentials!.base);
+      activeLiveFormat = chooseLiveFormat(auth);
+    } catch (error) {
+      const detail = safeProviderError(error);
+      await Promise.all(due.map((dataset) => markCatalogSyncAttempt(key, dataset, detail)));
+      if (generation === providerLoadGeneration) {
+        stateLabel.textContent = 'Offline · using saved catalog';
+        libraryMessage.textContent = `Could not refresh the provider. Saved catalogs remain available. ${detail}`;
+        libraryMessage.classList.remove('hidden', 'loading');
+        libraryMessage.classList.add('error');
+      }
+      await renderSyncStatus(key);
+      return;
+    }
+
+    const syncWarnings: string[] = [];
+    for (const dataset of due) {
+      try {
+        if (dataset === 'live') {
+          const results = await Promise.all([settle(api<Category[]>('get_live_categories', {}, 90_000)), settle(api<Channel[]>('get_live_streams', {}, 180_000))]);
+          if (results[1].status !== 'fulfilled' || !Array.isArray(results[1].value)) throw results[1].status === 'rejected' ? results[1].reason : new Error('Provider returned an invalid channel list.');
+          const nextChannels = uniqueById(results[1].value.filter((item) => item && item.stream_id !== undefined && item.name), (item) => item.stream_id);
+          if (!nextChannels.length) throw new Error('Provider returned an empty channel list; saved channels were kept.');
+          const nextCategories = results[0].status === 'fulfilled' && Array.isArray(results[0].value) ? results[0].value : categories;
+          channels = nextChannels; categories = nextCategories;
+          await writeCatalog({ key, savedAt: Date.now(), sourceType, categories, channels, movieCategories, movies, seriesCategories, series, playbackBase: playbackBase ?? undefined, allowedFormats: allowedLiveFormats, liveFormat: activeLiveFormat ?? undefined }, ['live']);
+        } else if (dataset === 'movies') {
+          const results = await Promise.all([settle(api<Category[]>('get_vod_categories', {}, 120_000)), settle(api<Movie[]>('get_vod_streams', {}, 180_000))]);
+          if (results[1].status !== 'fulfilled' || !Array.isArray(results[1].value)) throw results[1].status === 'rejected' ? results[1].reason : new Error('Invalid movie list.');
+          const nextMovies = uniqueById(results[1].value.filter((item) => item && item.stream_id !== undefined && item.name), (item) => item.stream_id);
+          if (!nextMovies.length) throw new Error('Provider returned an empty movie list; saved movies were kept.');
+          movies = nextMovies;
+          if (results[0].status === 'fulfilled' && Array.isArray(results[0].value)) movieCategories = results[0].value;
+          await writeCatalog({ key, savedAt: Date.now(), sourceType, categories, channels, movieCategories, movies, seriesCategories, series, playbackBase: playbackBase ?? undefined, allowedFormats: allowedLiveFormats, liveFormat: activeLiveFormat ?? undefined }, ['movies']);
+        } else {
+          const results = await Promise.all([settle(api<Category[]>('get_series_categories', {}, 120_000)), settle(api<Series[]>('get_series', {}, 180_000))]);
+          if (results[1].status !== 'fulfilled' || !Array.isArray(results[1].value)) throw results[1].status === 'rejected' ? results[1].reason : new Error('Invalid series list.');
+          const nextSeries = uniqueById(results[1].value.filter((item) => item && item.series_id !== undefined && item.name), (item) => item.series_id);
+          if (!nextSeries.length) throw new Error('Provider returned an empty series list; saved series were kept.');
+          series = nextSeries;
+          if (results[0].status === 'fulfilled' && Array.isArray(results[0].value)) seriesCategories = results[0].value;
+          await writeCatalog({ key, savedAt: Date.now(), sourceType, categories, channels, movieCategories, movies, seriesCategories, series, playbackBase: playbackBase ?? undefined, allowedFormats: allowedLiveFormats, liveFormat: activeLiveFormat ?? undefined }, ['series']);
+        }
+      } catch (error) {
+        const safeError = safeProviderError(error);
+        syncWarnings.push(`${dataset}: ${safeError}`);
+        await markCatalogSyncAttempt(key, dataset, safeError);
+      }
+    }
+    await pruneRebuildableCaches().catch(() => undefined);
+    if (generation === providerLoadGeneration) {
+      if (currentPage === 'movies' || currentPage === 'series' || currentPage === 'live') { updateCatalogHeading(); renderChannels(); }
+      if (currentPage === 'home') renderHome();
+      if (currentPage === 'settings') renderCategorySettings();
+      libraryMessage.textContent = syncWarnings.length
+        ? `Some catalogs could not refresh; saved data remains available. ${syncWarnings.join(' · ')}`
+        : 'Catalog refresh finished. Saved content is available while updates run.';
+      libraryMessage.classList.remove('hidden', 'loading');
+      libraryMessage.classList.toggle('error', syncWarnings.length > 0);
+      stateLabel.textContent = 'Connected';
+    }
+  } finally {
+    catalogSyncRunning = false;
+    await renderSyncStatus(key);
+  }
+}
+
+function scheduleCatalogSync(): void {
+  window.clearInterval(catalogSyncTimer);
+  catalogSyncTimer = window.setInterval(() => {
+    if (document.visibilityState !== 'hidden' && catalogCacheKey) void syncCatalogDatasets(catalogCacheKey, providerLoadGeneration);
+  }, 15 * 60 * 1000);
+}
+
 async function loadProvider(options: { startup?: boolean } = {}): Promise<void> {
   const generation = ++providerLoadGeneration;
   catalogBackgroundLoad = null;
@@ -2606,6 +2801,15 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     credentials = { base, username, password };
     cacheKey = sourceType === 'm3u' ? m3uCatalogKey(base) : catalogKey(base, username);
     catalogCacheKey = cacheKey;
+    // Save the entered login before any cache/provider work so network failure
+    // cannot discard credentials typed on this launch.
+    if (rememberProviderInput.checked) {
+      if (!await saveProvider({ base, username, password, format: formatInput.value as LiveFormat, kind: sourceType })) {
+        throw new Error('TV storage could not save the login. Uncheck “Remember this login” to connect without saving.');
+      }
+    } else {
+      await forgetProvider();
+    }
     watchScope = profileScopeForCatalog(cacheKey);
     migrateLegacyWatchHistory(cacheKey);
     loadHiddenCategories(cacheKey);
@@ -2615,7 +2819,8 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       // A cache failure must never prevent connecting to the provider.
     }
     if (generation !== providerLoadGeneration) return;
-    if (cache && Array.isArray(cache.channels) && cache.channels.length) {
+    const cacheHasContent = !!cache && ((cache.channels?.length ?? 0) > 0 || (cache.movies?.length ?? 0) > 0 || (cache.series?.length ?? 0) > 0);
+    if (cache && cacheHasContent && (sourceType === 'xtream' || Date.now() - cache.savedAt < 24 * 60 * 60 * 1000)) {
       categories = Array.isArray(cache.categories) ? cache.categories : [];
       channels = cache.channels;
       movieCategories = Array.isArray(cache.movieCategories) ? cache.movieCategories : [];
@@ -2629,30 +2834,22 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       allowedLiveFormats = Array.isArray(cache.allowedFormats) ? cache.allowedFormats : [];
       activeLiveFormat = cache.liveFormat ?? null;
       showCatalog(cache.savedAt);
-      const fresh = Date.now() - cache.savedAt < CATALOG_REFRESH_MS;
-      // A fresh catalog is sufficient for both auto-reconnect and a manual
-      // Connect action. Avoid fetching the same large provider lists on every
-      // app launch; stale catalogs continue through the refresh path below.
-      if (fresh && (sourceType === 'm3u' || (Array.isArray(cache.movies) && Array.isArray(cache.series)))) {
-        stateLabel.textContent = 'Connected';
-        libraryMessage.textContent = 'Using your saved channels. They refresh automatically after 24 hours.';
-        setBusy(false);
-        return;
+      categoryDropdownWidthReady = true;
+      stateLabel.textContent = 'Saved catalog loaded';
+      libraryMessage.textContent = 'Showing saved Live TV, Movies, and Series. Checking for due updates in the background…';
+      libraryMessage.classList.remove('hidden', 'error', 'loading');
+      setBusy(false);
+      finishProviderPreload();
+      if (sourceType === 'xtream') {
+        // Do not expose this refresh promise to page navigation: cached screens
+        // must remain immediately navigable while the provider syncs.
+        void syncCatalogDatasets(cacheKey, generation);
+      } else if (!cache.savedAt || Date.now() - cache.savedAt >= 24 * 60 * 60 * 1000) {
+        window.setTimeout(() => { if (generation === providerLoadGeneration) void loadProvider({ startup: true }); }, 0);
       }
-      libraryMessage.textContent = 'Showing saved channels while checking for updates…';
-      libraryMessage.classList.remove('hidden', 'error');
-      libraryMessage.classList.add('loading');
-      stateLabel.textContent = 'Refreshing saved channels…';
-    }
-
-    // Persist before network access so a failed/slow provider request cannot
-    // discard what the user entered. The opt-out removes any older saved login.
-    if (rememberProviderInput.checked) {
-      if (!await saveProvider({ base, username, password, format: formatInput.value as LiveFormat, kind: sourceType })) {
-        throw new Error('TV storage could not save the login. Uncheck “Remember this login” to connect without saving.');
-      }
-    } else {
-      await forgetProvider();
+      scheduleCatalogSync();
+      document.querySelector<HTMLButtonElement>('.nav-button[data-page="home"]')?.focus();
+      return;
     }
 
     if (sourceType === 'm3u') {
@@ -2699,7 +2896,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     const channelResponse = await api<Channel[]>('get_live_streams', {}, 180_000);
     if (generation !== providerLoadGeneration) return;
     if (!Array.isArray(channelResponse)) throw new Error('Provider returned an invalid live channel list.');
-    channels = channelResponse.filter((channel) => channel && channel.stream_id !== undefined && channel.name);
+    channels = uniqueById(channelResponse.filter((channel) => channel && channel.stream_id !== undefined && channel.name), (channel) => channel.stream_id);
     if (!channels.length) throw new Error('The provider account has no live channels.');
 
     if (providerPreloadActive && sourceType === 'xtream') {
@@ -2889,10 +3086,12 @@ async function fetchSeriesEpisodes(seriesId: string | number): Promise<SeriesEpi
       episodes.push(episode);
     }
   }
-  return episodes.sort((left, right) => {
+  const sorted = episodes.sort((left, right) => {
     const seasonDifference = Number(left.season ?? 0) - Number(right.season ?? 0);
     return seasonDifference || Number(left.episode_num ?? 0) - Number(right.episode_num ?? 0);
   });
+  if (catalogCacheKey && sorted.length) void writeSeriesEpisodes(catalogCacheKey, seriesId, sorted).catch(() => undefined);
+  return sorted;
 }
 
 async function openSeries(item: Series): Promise<void> {
@@ -2905,7 +3104,16 @@ async function openSeries(item: Series): Promise<void> {
   libraryMessage.textContent = `Loading episodes for ${item.name ?? 'series'}…`;
   libraryMessage.classList.remove('hidden', 'error');
   libraryMessage.classList.add('loading');
-  const episodeLoad = fetchSeriesEpisodes(item.series_id);
+  const episodeLoad = readSeriesEpisodes(catalogCacheKey, item.series_id).then(async (cachedEpisodes) => {
+    if (cachedEpisodes.length) {
+      seriesEpisodes = cachedEpisodes;
+      renderChannels();
+      libraryMessage.textContent = `${seriesEpisodes.length} saved episodes`;
+      libraryMessage.classList.remove('loading');
+      return cachedEpisodes;
+    }
+    return fetchSeriesEpisodes(item.series_id);
+  });
   monitorScreenLoad(episodeLoad, 'Loading episodes…');
   try {
     seriesEpisodes = await episodeLoad;
@@ -3710,6 +3918,20 @@ backupFileInput.addEventListener('change', () => {
 $('refresh-diagnostics').addEventListener('click', () => { void refreshDiagnostics(); });
 $('clear-cache').addEventListener('click', () => { void clearSavedCaches(); });
 $('check-updates').addEventListener('click', () => { void checkForAppUpdate(); });
+$('refresh-catalogs').addEventListener('click', () => {
+  if (!catalogCacheKey || !credentials) { syncStatus.textContent = 'Connect a provider before refreshing catalogs.'; return; }
+  if (!navigator.onLine) { syncStatus.textContent = 'TV is offline. Saved catalogs are available; refresh will retry when the network returns.'; return; }
+  syncStatus.textContent = 'Refreshing Live TV, Movies, and Series…';
+  void syncCatalogDatasets(catalogCacheKey, providerLoadGeneration, true);
+});
+[liveRefreshInterval, moviesRefreshInterval, seriesRefreshInterval].forEach((select) => {
+  select.addEventListener('change', () => {
+    refreshIntervals = { live: Number(liveRefreshInterval.value), movies: Number(moviesRefreshInterval.value), series: Number(seriesRefreshInterval.value) };
+    try { localStorage.setItem(REFRESH_INTERVAL_KEY, JSON.stringify(refreshIntervals)); } catch { /* Keep values for this app session. */ }
+    void writeAppSetting('catalog-refresh-intervals', refreshIntervals).catch(() => undefined);
+    void renderSyncStatus();
+  });
+});
 async function saveMetadataApiKeys(): Promise<void> {
   tmdbApiKey = tmdbKeyInput.value.trim();
   opensubtitlesKey = opensubtitlesKeyInput.value.trim();
@@ -3755,7 +3977,7 @@ seekForwardButton.addEventListener('click', () => seekBy(10));
 subtitleTracksButton.addEventListener('click', showTrackMenu);
 playerLayer.addEventListener('click', (event) => {
   const target = event.target;
-  if (openTrackMenu && target instanceof Node && !trackMenu.contains(target) && target !== subtitleTracksButton) closeTrackMenu(false);
+  if (openTrackMenu && target instanceof Node && !trackMenu.contains(target) && !subtitleTracksButton.contains(target)) closeTrackMenu(false);
   revealPlayerControls(false);
 });
 playerLayer.addEventListener('mousemove', () => revealPlayerControls(false));
@@ -3887,6 +4109,12 @@ window.addEventListener('keydown', (event) => {
   }
 
   if (isOK && target) {
+    if (target === subtitleTracksButton) {
+      event.preventDefault();
+      event.stopPropagation();
+      showTrackMenu();
+      return;
+    }
     const dropdown = Array.from(dropdownControls.values()).find((control) => control.trigger === target);
     if (dropdown) {
       event.preventDefault();
@@ -3981,6 +4209,18 @@ void readAppSetting('metadata-api-keys').then((saved) => {
 }).catch(() => { /* API keys are optional when TV storage is unavailable. */ });
 loadHomePlaylistPreferences();
 loadAppTheme();
+loadRefreshIntervals();
+void readAppSetting('catalog-refresh-intervals').then((saved) => {
+  if (!saved || typeof saved !== 'object') return;
+  const values = saved as Partial<Record<CatalogDataset, unknown>>;
+  (['live', 'movies', 'series'] as CatalogDataset[]).forEach((dataset) => {
+    const hours = Number(values[dataset]);
+    if ([3, 6, 12, 24].includes(hours)) refreshIntervals[dataset] = hours;
+  });
+  liveRefreshInterval.value = String(refreshIntervals.live);
+  moviesRefreshInterval.value = String(refreshIntervals.movies);
+  seriesRefreshInterval.value = String(refreshIntervals.series);
+}).catch(() => undefined);
 populateLanguagePreferences();
 loadTrackPreferencesForProfile();
 
@@ -4014,6 +4254,24 @@ if (!localProvider.base || !localProvider.username || !localProvider.password) {
     window.setTimeout(() => { void loadProvider({ startup: true }); }, 300);
   }).catch(() => { /* Stay on setup when persistent TV storage is unavailable. */ });
 }
+
+window.addEventListener('online', () => {
+  if (catalogCacheKey && credentials) void syncCatalogDatasets(catalogCacheKey, providerLoadGeneration);
+});
+window.addEventListener('offline', () => {
+  if (catalogCacheKey) {
+    stateLabel.textContent = 'Offline · using saved catalog';
+    libraryMessage.textContent = 'Network unavailable. Your saved Live TV, Movies, and Series remain available.';
+    libraryMessage.classList.remove('hidden', 'loading');
+  }
+});
+window.addEventListener('pageshow', () => {
+  if (catalogCacheKey && credentials) void syncCatalogDatasets(catalogCacheKey, providerLoadGeneration);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && catalogCacheKey && credentials) void syncCatalogDatasets(catalogCacheKey, providerLoadGeneration);
+});
+scheduleCatalogSync();
 
 if (screenLoadingDemo) {
   window.setTimeout(() => {
