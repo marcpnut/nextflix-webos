@@ -457,15 +457,21 @@ async function api<T>(action?: string, extra: Record<string, string> = {}, timeo
   const controller = createAbortController();
   requestControllers.add(controller);
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  let abortHandler: (() => void) | null = null;
   const query = new URLSearchParams({ username: credentials.username, password: credentials.password, ...extra });
   if (action) query.set('action', action);
   try {
-    const response = await fetch(`${credentials.base}/player_api.php?${query.toString()}`, {
-      method: 'GET',
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      signal: controller.signal
+    const requestUrl = `${credentials.base}/player_api.php?${query.toString()}`;
+    const legacyWebOsFetch = /Chrome\/53\.0/.test(navigator.userAgent) && /WebAppManager/.test(navigator.userAgent);
+    const request = legacyWebOsFetch
+      ? fetch(requestUrl)
+      : fetch(requestUrl, { method: 'GET', headers: { Accept: 'application/json' }, cache: 'no-store', signal: controller.signal });
+    const abort = new Promise<Response>((_resolve, reject) => {
+      abortHandler = () => reject(new Error('Provider request aborted.'));
+      if (controller.signal.aborted) abortHandler();
+      else controller.signal.addEventListener('abort', abortHandler);
     });
+    const response = await Promise.race([request, abort]);
     if (!response.ok) {
       if (response.status === 511) throw new Error(await describe511(response, credentials.base));
       throw new Error(`Provider returned HTTP ${response.status}.`);
@@ -479,6 +485,7 @@ async function api<T>(action?: string, extra: Record<string, string> = {}, timeo
     throw new Error('Could not reach the provider. Check the URL, network, TLS, and browser CORS support.');
   } finally {
     window.clearTimeout(timeout);
+    if (abortHandler) controller.signal.removeEventListener('abort', abortHandler);
     requestControllers.delete(controller);
   }
 }
