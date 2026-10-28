@@ -312,7 +312,8 @@ select option { color: #fff; background: var(--surface); }
   .profiles-list > * + * { margin-top: 10px; }
   .channel-list, .category-visibility-list, .home-playlist-options { display: flex; flex-wrap: wrap; }
   .channel-card { flex: 0 0 calc((100% - 104px) / 4); margin: 0 26px 26px 0; }
-  .category-visibility-item, .home-playlist-option { flex: 0 0 calc(50% - 9px); margin: 0 18px 10px 0; }
+  /* Leave room for the right margin or two half-width items wrap to one column. */
+  .category-visibility-item, .home-playlist-option { flex: 0 0 calc(50% - 18px); margin: 0 16px 10px 0; }
   .detail-layout { display: flex; }
   .detail-layout > :first-child { flex: 0 0 32%; max-width: 360px; margin-right: 42px; }
   .detail-layout > :last-child { flex: 1 1 auto; min-width: 0; }

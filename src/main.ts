@@ -158,7 +158,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.19';
+const APP_VERSION = '1.0.20';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -903,6 +903,10 @@ function setupDropdowns(): void {
     const control: DropdownControl = { select, wrapper, trigger, list, originalValue: select.value };
     dropdownControls.set(select, control);
     wrapper.addEventListener('focusout', (event: FocusEvent) => {
+      // C9 WebKit often reports a null relatedTarget during an in-wrapper
+      // remote focus move, which closes the list before an option can be chosen.
+      // On TV, explicit remote-key and outside-click handling closes it safely.
+      if (document.documentElement.classList.contains('webos-tv')) return;
       const next = event.relatedTarget;
       if (next instanceof Node && wrapper.contains(next)) return;
       window.setTimeout(() => {

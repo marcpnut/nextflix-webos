@@ -1,0 +1,16 @@
+{
+  "id": "com.nextflix.iptv",
+  "version": "1.0.20",
+  "type": "web",
+  "title": "NextFlix",
+  "appDescription": "Fix category columns and subtitle language selection on older webOS.",
+  "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
+  "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
+  "rootRequired": false,
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.20_all.ipk",
+  "ipkHash": {
+    "sha256": "1bf0b61f62a46df476d44756d4878e0e380aa782798cd973fdb491a1e6d95878"
+  },
+  "ipkSize": 68036,
+  "installedSize": 205432
+}
