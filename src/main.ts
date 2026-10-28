@@ -1,4 +1,5 @@
 import './style.css';
+import './platform/webOSTV.js';
 import {
   readCatalog,
   writeCatalog,
@@ -22,6 +23,7 @@ import {
   type EpgChannel,
   type EpgProgram
 } from './epg';
+import { WebOsMediaSubtitleAdapter, type WebOsSubtitleTrack } from './platform/webos-media';
 
 type XtreamAuth = {
   user_info?: { auth?: number; status?: string; exp_date?: string | null; allowed_output_formats?: string[] };
@@ -67,7 +69,15 @@ const heroPlayButton = $('hero-play') as HTMLButtonElement;
 const heroBrowseButton = $('hero-browse') as HTMLButtonElement;
 const homeMovies = $('home-movies');
 const homeSeries = $('home-series');
+const homeRecommended = $('home-recommended');
+const recommendedRow = $('recommended-row');
 const homeContinue = $('home-continue');
+const activeProfileLabel = $('active-profile-name');
+const profileSwitchButton = $('profile-switch') as HTMLButtonElement;
+const profileDialog = $('profiles-dialog');
+const profileList = $('profiles-list');
+const profileNameInput = $('profile-name') as HTMLInputElement;
+const profileMessage = $('profile-message');
 const continueRow = $('continue-row');
 const languageFilter = $('language-filter');
 const languageSelect = $('language-select') as HTMLSelectElement;
@@ -94,10 +104,14 @@ const nextPageButton = $('page-next') as HTMLButtonElement;
 const pageIndicator = $('page-indicator');
 const libraryMessage = $('library-message');
 const openGuideButton = $('open-guide') as HTMLButtonElement;
+const livePreview = $('live-preview');
+const livePreviewTitle = $('live-preview-title');
+const livePreviewMessage = $('live-preview-message');
 const playerLayer = $('player');
 const epgGuide = $('epg-guide');
 const epgGuideStatus = $('epg-guide-status');
 const epgPreviewTitle = $('epg-preview-title');
+const epgPreviewVideo = $('epg-preview-video');
 const epgGrid = $('epg-grid');
 const epgPagePrevious = $('epg-page-previous') as HTMLButtonElement;
 const epgPageNext = $('epg-page-next') as HTMLButtonElement;
@@ -132,9 +146,7 @@ const seekRow = $('seek-row');
 const seekBar = $('seek-bar') as HTMLInputElement;
 const seekCurrent = $('seek-current');
 const seekDuration = $('seek-duration');
-const audioLanguagePreferencesInput = $('audio-language-preferences') as HTMLSelectElement;
 const subtitleLanguagePreferencesInput = $('subtitle-language-preferences') as HTMLSelectElement;
-const audioTracksButton = $('audio-tracks') as HTMLButtonElement;
 const subtitleTracksButton = $('subtitle-tracks') as HTMLButtonElement;
 const trackMenu = $('track-menu');
 const trackMenuTitle = $('track-menu-title');
@@ -148,13 +160,14 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.4.0';
+const APP_VERSION = '0.5.0';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
 let credentials: { base: string; username: string; password: string } | null = null;
 let playbackBase: string | null = null;
 let watchScope = 'default';
+let catalogCacheKey = '';
 let allowedLiveFormats: string[] = [];
 let activeLiveFormat: string | null = null;
 let categories: Category[] = [];
@@ -188,16 +201,22 @@ let hiddenCategoriesKey = 'nextflix.hidden-categories.v1';
 let languageFilterKey = 'nextflix.language-filter.v1';
 let activeLanguageFilters: Record<CatalogView, string> = { live: 'all', movies: 'all', series: 'all' };
 let favorites = new Set<string>();
+type ViewerProfile = { id: string; name: string };
+const PROFILES_KEY = 'nextflix.profiles.v1';
+const ACTIVE_PROFILE_KEY = 'nextflix.active-profile.v1';
+let profiles: ViewerProfile[] = [{ id: 'default', name: 'Default' }];
+let activeProfileId = 'default';
 const FAVORITES_KEY = 'nextflix.my-list.v1';
 const WATCH_HISTORY_KEY = 'nextflix.watch-history.v1';
 const TRACK_PREFERENCES_KEY = 'nextflix.track-preferences.v1';
 const EPG_SETTINGS_KEY = 'nextflix.epg-settings.v1';
 const EPG_MAPPINGS_KEY = 'nextflix.epg-mappings.v1';
-const EPG_CHANNELS_PER_PAGE = 14;
+const EPG_CHANNELS_PER_PAGE = 5;
 const EPG_HOUR_WIDTH = 150;
-const EPG_GRID_HOURS = 24;
-const EPG_CHANNEL_FALLBACK_LIMIT = 28;
+const EPG_GRID_HOURS = 4;
+const EPG_CHANNEL_FALLBACK_LIMIT = EPG_CHANNELS_PER_PAGE;
 type MediaTrack = { language?: string; label?: string; kind?: string; enabled?: boolean; mode?: string };
+type SubtitleTrackChoice = { source: 'html' | 'webos'; index: number; track?: MediaTrack; language?: string; label: string };
 type TrackList = { length: number; [index: number]: MediaTrack; addEventListener?: (type: string, listener: EventListener) => void };
 type DropdownControl = { select: HTMLSelectElement; wrapper: HTMLDivElement; trigger: HTMLButtonElement; list: HTMLDivElement; originalValue: string };
 type WatchProgress = {
@@ -216,6 +235,7 @@ type WatchProgress = {
   position: number;
   duration: number;
   updatedAt: number;
+  genre?: string;
 };
 let watchHistory: WatchProgress[] = [];
 let currentVodEntry: WatchProgress | null = null;
@@ -227,6 +247,9 @@ let renderedCount = 0;
 let catalogPages: Record<'movies' | 'series', number> = { movies: 1, series: 1 };
 let catalogTotalPages = 1;
 let selectedChannel: Channel | null = null;
+let guideReturnsToLivePreview = false;
+let guideReturnFocus: HTMLElement | null = null;
+let returnToLivePreviewOnPlayerClose = false;
 let requestController: AbortController | null = null;
 let backPressCount = 0;
 let backPressResetTimer = 0;
@@ -240,11 +263,10 @@ let focusedDropdownOption = 0;
 let editingInput: HTMLInputElement | null = null;
 const inputProxies = new Map<HTMLInputElement, HTMLButtonElement>();
 const dropdownControls = new Map<HTMLSelectElement, DropdownControl>();
-let preferredAudioLanguages = ['en'];
 let preferredSubtitleLanguages = ['nl'];
-let manualAudioTrackIndex: number | null = null;
-let manualSubtitleTrackIndex: number | null = null;
-let openTrackMenu: 'audio' | 'subtitles' | null = null;
+let manualSubtitleTrack: SubtitleTrackChoice | null | 'off' = null;
+let openTrackMenu = false;
+const webOsSubtitleAdapter = new WebOsMediaSubtitleAdapter();
 let episodeCountdownTimer = 0;
 let nextEpisode: SeriesEpisode | null = null;
 const observedTrackLists = new WeakSet<object>();
@@ -541,29 +563,34 @@ function providerXmltvUrl(): string {
 
 async function fetchProviderEpgForChannels(targetChannels: Channel[], signal?: AbortSignal): Promise<number> {
   if (!credentials || sourceType !== 'xtream') return 0;
-  let added = 0;
-  const total = Math.min(targetChannels.length, EPG_CHANNELS_PER_PAGE);
-  for (const [index, channel] of targetChannels.slice(0, EPG_CHANNELS_PER_PAGE).entries()) {
-    const streamId = String(channel.stream_id);
-    if (signal?.aborted || !credentials) break;
-    if (epgProgramIndex.has(streamId) || epgProviderFetchedChannels.has(streamId)) continue;
-    epgProviderFetchedChannels.add(streamId);
-    epgGuideStatus.textContent = `Loading guide data for ${channel.name ?? 'channel'} (${index + 1} of ${total})…`;
+  const batch = targetChannels.slice(0, EPG_CHANNELS_PER_PAGE).filter((channel) => {
+    const id = String(channel.stream_id);
+    if (epgProgramIndex.has(id) || epgProviderFetchedChannels.has(id)) return false;
+    epgProviderFetchedChannels.add(id);
+    return true;
+  });
+  if (signal?.aborted || !credentials || !batch.length) return 0;
+  epgGuideStatus.textContent = `Loading guide data for ${batch.length} channels…`;
+  const results = await Promise.all(batch.map(async (channel) => {
     try {
       const response = await api<unknown>('get_simple_data_table', { stream_id: String(channel.stream_id) }, 45_000);
-      const programs = parseProviderEpg(channel.stream_id, response);
-      if (programs.length) {
-        epgPrograms.push(...programs);
-        if (!epgChannels.some((entry) => entry.id === String(channel.stream_id))) {
-          epgChannels.push({ id: String(channel.stream_id), name: channel.name ?? `Channel ${channel.stream_id}` });
-        }
-        added += programs.length;
-        indexEpgPrograms();
-      }
+      return { channel, programs: parseProviderEpg(channel.stream_id, response) };
     } catch {
       // A provider can omit its EPG action while still allowing XMLTV playback.
+      return { channel, programs: [] as EpgProgram[] };
     }
+  }));
+  if (signal?.aborted) return 0;
+  let added = 0;
+  for (const { channel, programs } of results) {
+    if (!programs.length) continue;
+    epgPrograms.push(...programs);
+    if (!epgChannels.some((entry) => entry.id === String(channel.stream_id))) {
+      epgChannels.push({ id: String(channel.stream_id), name: channel.name ?? `Channel ${channel.stream_id}` });
+    }
+    added += programs.length;
   }
+  if (added) indexEpgPrograms();
   return added;
 }
 
@@ -572,7 +599,7 @@ function scheduleEpgRefresh(): void {
   epgRefreshTimer = window.setTimeout(() => { void refreshEpg(true); }, EPG_REFRESH_MS);
 }
 
-async function refreshEpg(force: boolean): Promise<void> {
+async function refreshEpg(force: boolean, quickGuidePage = false): Promise<void> {
   if (!credentials) {
     epgSettingsStatus.textContent = 'Connect a provider before refreshing the guide.';
     return;
@@ -613,7 +640,7 @@ async function refreshEpg(force: boolean): Promise<void> {
     const customUrl = xmltvUrlInput.value.trim();
     let guide: { channels: EpgChannel[]; programs: EpgProgram[] } | null = null;
     let xmltvError = '';
-    if (customUrl || sourceType === 'xtream') {
+    if (customUrl || (sourceType === 'xtream' && !quickGuidePage)) {
       try {
         const sourceUrl = customUrl ? new URL(customUrl).toString() : providerXmltvUrl();
         guide = await fetchXmltv(sourceUrl, controller.signal);
@@ -846,7 +873,9 @@ function endInputEditing(): void {
 }
 
 function setupInputProxies(): void {
-  document.querySelectorAll<HTMLInputElement>('input[type="text"], input[type="url"], input[type="search"], input[type="password"]')
+  document.querySelectorAll<HTMLInputElement>(
+    'input:not([type]), input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="color"]):not([type="image"]):not([type="hidden"])'
+  )
     .forEach((input) => {
       const proxy = document.createElement('button');
       proxy.type = 'button';
@@ -1058,7 +1087,7 @@ function loadWatchHistory(): void {
       ? (saved as WatchProgress[]).filter((entry) => entry && (entry.kind === 'movie' || entry.kind === 'series')
         && typeof entry.scope === 'string' && typeof entry.id === 'string' && typeof entry.title === 'string'
         && Number.isFinite(entry.position) && Number.isFinite(entry.duration) && entry.duration > 0)
-        .sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 40)
+        .sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 320)
       : [];
   } catch {
     watchHistory = [];
@@ -1067,6 +1096,153 @@ function loadWatchHistory(): void {
 
 function persistWatchHistory(): void {
   try { localStorage.setItem(WATCH_HISTORY_KEY, JSON.stringify(watchHistory)); } catch { /* Resume data stays in memory if storage is full. */ }
+}
+
+function migrateLegacyWatchHistory(cacheKey: string): void {
+  if (activeProfileId !== 'default') return;
+  const legacyProviderScope = m3uCatalogKey(cacheKey);
+  const targetScope = profileScopeForCatalog(cacheKey, activeProfileId);
+  let changed = false;
+  for (const entry of watchHistory) {
+    if (entry.scope === 'default' || entry.scope === legacyProviderScope) {
+      const previousScope = entry.scope;
+      entry.scope = targetScope;
+      entry.key = entry.key.startsWith(`${previousScope}:`)
+        ? `${targetScope}${entry.key.slice(previousScope.length)}`
+        : `${targetScope}:${entry.key}`;
+      changed = true;
+    }
+  }
+  if (changed) persistWatchHistory();
+}
+
+function profileStorageKey(baseKey: string, profileId = activeProfileId): string {
+  return `${baseKey}.${profileId}`;
+}
+
+function profileScopeForCatalog(cacheKey: string, profileId = activeProfileId): string {
+  return `${profileId}:${m3uCatalogKey(cacheKey)}`;
+}
+
+function initializeProfiles(): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PROFILES_KEY) ?? 'null') as unknown;
+    if (Array.isArray(saved)) {
+      const valid = (saved as ViewerProfile[]).filter((profile) => profile && typeof profile.id === 'string'
+        && typeof profile.name === 'string' && profile.id && profile.name.trim()).slice(0, 8)
+        .map((profile) => ({ id: profile.id, name: profile.name.trim().slice(0, 24) }));
+      if (valid.length) profiles = valid;
+    }
+    const active = localStorage.getItem(ACTIVE_PROFILE_KEY);
+    if (active && profiles.some((profile) => profile.id === active)) activeProfileId = active;
+  } catch { /* Keep the single local Default profile when storage is unavailable. */ }
+  activeProfileLabel.textContent = profiles.find((profile) => profile.id === activeProfileId)?.name ?? 'Default';
+}
+
+function saveProfiles(): void {
+  try { localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles)); } catch { /* Existing profiles remain available for this session. */ }
+}
+
+function loadFavoritesForProfile(migrateLegacy = false): void {
+  try {
+    const saved = localStorage.getItem(profileStorageKey(FAVORITES_KEY));
+    if (saved !== null) {
+      const parsed = JSON.parse(saved) as unknown;
+      favorites = new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+      return;
+    }
+    if (migrateLegacy && activeProfileId === 'default') {
+      const legacy = JSON.parse(localStorage.getItem(FAVORITES_KEY) ?? '[]') as unknown;
+      favorites = new Set(Array.isArray(legacy) ? legacy.map(String) : []);
+      localStorage.setItem(profileStorageKey(FAVORITES_KEY), JSON.stringify(Array.from(favorites)));
+      return;
+    }
+  } catch { /* Fall back to an empty in-memory list if local storage is unavailable. */ }
+  favorites = new Set();
+}
+
+function loadTrackPreferencesForProfile(profileId = activeProfileId): void {
+  preferredSubtitleLanguages = ['nl'];
+  try {
+    const saved = localStorage.getItem(profileStorageKey(TRACK_PREFERENCES_KEY, profileId))
+      ?? (profileId === 'default' ? localStorage.getItem(TRACK_PREFERENCES_KEY) : null);
+    const preferences = JSON.parse(saved ?? 'null') as { subtitles?: unknown } | null;
+    if (Array.isArray(preferences?.subtitles)) {
+      preferredSubtitleLanguages = preferences.subtitles.map(String).filter(Boolean).slice(0, 1);
+    }
+  } catch { /* Use the built-in subtitle preference for new profiles. */ }
+  subtitleLanguagePreferencesInput.value = preferredSubtitleLanguages[0] ?? '';
+}
+
+function renderProfileOptions(): void {
+  clearChildren(profileList);
+  for (const profile of profiles) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `profile-option${profile.id === activeProfileId ? ' active' : ''}`;
+    button.textContent = `${profile.name}${profile.id === activeProfileId ? ' · Current' : ''}`;
+    button.setAttribute('aria-pressed', String(profile.id === activeProfileId));
+    button.addEventListener('click', () => switchProfile(profile.id));
+    profileList.appendChild(button);
+  }
+}
+
+function openProfilesDialog(): void {
+  renderProfileOptions();
+  profileMessage.textContent = '';
+  profileNameInput.value = '';
+  updateInputProxy(profileNameInput);
+  profileDialog.classList.remove('hidden');
+  profileList.querySelector<HTMLButtonElement>('.profile-option.active')?.focus();
+}
+
+function closeProfilesDialog(): void {
+  profileDialog.classList.add('hidden');
+  profileSwitchButton.focus();
+}
+
+function switchProfile(profileId: string): void {
+  const profile = profiles.find((entry) => entry.id === profileId);
+  if (!profile) return;
+  activeProfileId = profile.id;
+  activeProfileLabel.textContent = profile.name;
+  try { localStorage.setItem(ACTIVE_PROFILE_KEY, profile.id); } catch { /* Current profile remains active for this session. */ }
+  watchScope = catalogCacheKey ? profileScopeForCatalog(catalogCacheKey, profile.id) : profile.id;
+  loadFavoritesForProfile();
+  loadTrackPreferencesForProfile(profile.id);
+  renderProfileOptions();
+  renderContinueWatching();
+  renderHome();
+  renderMyList();
+  if (detailItem?.kind === 'movie') {
+    detailListButton.textContent = favorites.has(favoriteKey('movie', detailItem.item.stream_id)) ? 'Remove from My List' : 'Add to My List';
+  } else if (detailItem?.kind === 'series') {
+    detailListButton.textContent = favorites.has(favoriteKey('series', detailItem.item.series_id)) ? 'Remove from My List' : 'Add to My List';
+  }
+  profileDialog.classList.add('hidden');
+  profileSwitchButton.focus();
+}
+
+function addViewerProfile(): void {
+  const name = profileNameInput.value.trim().replace(/\s+/g, ' ').slice(0, 24);
+  if (!name) {
+    profileMessage.textContent = 'Enter a name for the new profile.';
+    focusInputProxy(profileNameInput);
+    return;
+  }
+  if (profiles.length >= 8) {
+    profileMessage.textContent = 'You can create up to eight profiles on this TV.';
+    return;
+  }
+  if (profiles.some((profile) => profile.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+    profileMessage.textContent = 'A profile with that name already exists.';
+    focusInputProxy(profileNameInput);
+    return;
+  }
+  const profile = { id: `viewer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, name };
+  profiles.push(profile);
+  saveProfiles();
+  switchProfile(profile.id);
 }
 
 function playbackTime(seconds: number): string {
@@ -1112,8 +1288,18 @@ function tracksOf(list: TrackList | null): MediaTrack[] {
   return tracks;
 }
 
-function subtitleTracks(): MediaTrack[] {
-  return tracksOf(subtitleTrackList()).filter((track) => !track.kind || ['subtitles', 'captions', 'forced'].includes(track.kind));
+function subtitleTracks(): SubtitleTrackChoice[] {
+  const htmlTracks = tracksOf(subtitleTrackList())
+    .map((track, index) => ({ track, index }))
+    .filter(({ track }) => !track.kind || ['subtitles', 'captions', 'forced'].includes(track.kind))
+    .map(({ track, index }) => ({ source: 'html' as const, track, index, language: track.language, label: track.label || track.language || `Subtitle ${index + 1}` }));
+  if (htmlTracks.length) return htmlTracks;
+  return webOsSubtitleAdapter.availableTracks.map((track: WebOsSubtitleTrack) => ({
+    source: 'webos' as const,
+    index: track.index,
+    language: track.language,
+    label: track.label
+  }));
 }
 
 function normalizeTrackLanguage(value: string): string {
@@ -1130,25 +1316,35 @@ function trackMatchesPreferences(track: MediaTrack, preferences: string[]): bool
 }
 
 function updateTrackButtonVisibility(): void {
-  audioTracksButton.classList.toggle('hidden', tracksOf(audioTrackList()).length === 0);
-  subtitleTracksButton.classList.toggle('hidden', subtitleTracks().length === 0);
+  subtitleTracksButton.classList.remove('hidden');
+}
+
+function keepMainAudioTrack(): void {
+  const audioTracks = tracksOf(audioTrackList());
+  if (!audioTracks.length) return;
+  const mainIndices = audioTracks.map((track, index) => track.kind?.toLowerCase() === 'main' ? index : -1).filter((index) => index >= 0);
+  if (!mainIndices.length) return; // Preserve the provider/decoder's chosen default when roles are not exposed.
+  const selectedIndex = mainIndices.find((index) => audioTracks[index].enabled) ?? mainIndices[0];
+  audioTracks.forEach((track, index) => { try { track.enabled = index === selectedIndex; } catch { /* Leave decoder selection unchanged when track control is read-only. */ } });
 }
 
 function applyPreferredTracks(): void {
-  const audioTracks = tracksOf(audioTrackList());
-  if (manualAudioTrackIndex === null && audioTracks.length) {
-    let preferredIndex = audioTracks.findIndex((track) => trackMatchesPreferences(track, preferredAudioLanguages));
-    if (preferredIndex < 0) preferredIndex = Math.max(0, audioTracks.findIndex((track) => track.enabled));
-    audioTracks.forEach((track, index) => { try { track.enabled = index === preferredIndex; } catch { /* Ignore read-only track implementations. */ } });
-  }
-
+  keepMainAudioTrack();
   const subtitles = subtitleTracks();
-  if (manualSubtitleTrackIndex === null) {
-    const preferredIndex = subtitles.findIndex((track) => trackMatchesPreferences(track, preferredSubtitleLanguages));
-    subtitles.forEach((track, index) => { try { track.mode = index === preferredIndex ? 'showing' : 'disabled'; } catch { /* Ignore unsupported subtitle controls. */ } });
+  if (manualSubtitleTrack === null) {
+    const preferred = subtitles.find((track) => trackMatchesPreferences(track, preferredSubtitleLanguages));
+    if (preferred) {
+      selectSubtitleTrack(preferred, false);
+    } else {
+      subtitles.forEach((choice) => { if (choice.source === 'html' && choice.track) choice.track.mode = 'disabled'; });
+      if (webOsSubtitleAdapter.availableTracks.length) void webOsSubtitleAdapter.select(null).catch(() => undefined);
+    }
+  } else if (manualSubtitleTrack === 'off') {
+    subtitles.forEach((choice) => { if (choice.source === 'html' && choice.track) choice.track.mode = 'disabled'; });
+    if (webOsSubtitleAdapter.availableTracks.length) void webOsSubtitleAdapter.select(null).catch(() => undefined);
   }
   updateTrackButtonVisibility();
-  if (openTrackMenu) renderTrackMenu(openTrackMenu);
+  if (openTrackMenu) renderTrackMenu();
 }
 
 function observeAvailableTracks(): void {
@@ -1157,20 +1353,34 @@ function observeAvailableTracks(): void {
     if (observedTrackLists.has(list)) continue;
     observedTrackLists.add(list);
     list.addEventListener?.('addtrack', applyPreferredTracks);
+    list.addEventListener?.('change', applyPreferredTracks);
   }
 }
 
 function closeTrackMenu(restoreFocus = true): void {
-  const previousMenu = openTrackMenu;
-  openTrackMenu = null;
+  openTrackMenu = false;
   trackMenu.classList.add('hidden');
-  if (restoreFocus) (previousMenu === 'audio' ? audioTracksButton : subtitleTracksButton).focus();
+  if (restoreFocus) subtitleTracksButton.focus();
 }
 
-function renderTrackMenu(type: 'audio' | 'subtitles'): void {
-  const tracks = type === 'audio' ? tracksOf(audioTrackList()) : subtitleTracks();
+function selectSubtitleTrack(choice: SubtitleTrackChoice, manual: boolean): void {
+  if (manual) manualSubtitleTrack = choice;
+  if (choice.source === 'webos') {
+    void webOsSubtitleAdapter.select(choice.index).then(() => {
+      playerMessage.textContent = '';
+    }).catch((error: unknown) => {
+      playerMessage.textContent = error instanceof Error ? error.message : 'The TV could not select this subtitle.';
+    });
+    return;
+  }
+  const tracks = tracksOf(subtitleTrackList()).filter((track) => !track.kind || ['subtitles', 'captions', 'forced'].includes(track.kind));
+  tracks.forEach((track, index) => { try { track.mode = index === choice.index ? 'showing' : 'disabled'; } catch { /* Ignore unsupported native text-track controls. */ } });
+}
+
+function renderTrackMenu(): void {
+  const tracks = subtitleTracks();
   clearChildren(trackOptions);
-  trackMenuTitle.textContent = type === 'audio' ? 'Audio' : 'Subtitles';
+  trackMenuTitle.textContent = 'Subtitles';
   const addOption = (label: string, selected: boolean, onSelect: () => void): void => {
     const option = document.createElement('button');
     option.type = 'button';
@@ -1180,43 +1390,32 @@ function renderTrackMenu(type: 'audio' | 'subtitles'): void {
     option.addEventListener('click', () => { onSelect(); closeTrackMenu(); });
     trackOptions.appendChild(option);
   };
-  if (type === 'audio') {
-    addOption('Auto · preferred language', manualAudioTrackIndex === null, () => {
-      manualAudioTrackIndex = null;
+  addOption('Auto · preferred language', manualSubtitleTrack === null, () => {
+      manualSubtitleTrack = null;
       applyPreferredTracks();
-    });
-    tracks.forEach((track, index) => {
-      addOption(track.label || track.language || `Audio ${index + 1}`, manualAudioTrackIndex === index || (manualAudioTrackIndex === null && track.enabled === true), () => {
-        manualAudioTrackIndex = index;
-        tracks.forEach((entry, trackIndex) => { try { entry.enabled = trackIndex === index; } catch { /* Ignore read-only track implementations. */ } });
-      });
-    });
-  } else {
-    addOption('Auto · preferred language', manualSubtitleTrackIndex === null, () => {
-      manualSubtitleTrackIndex = null;
-      applyPreferredTracks();
-    });
-    addOption('Off', manualSubtitleTrackIndex === -1 || (manualSubtitleTrackIndex === null && !tracks.some((track) => track.mode === 'showing')), () => {
-      manualSubtitleTrackIndex = -1;
-      tracks.forEach((track) => { try { track.mode = 'disabled'; } catch { /* Ignore unsupported subtitle controls. */ } });
-    });
-    tracks.forEach((track, index) => {
-      addOption(track.label || track.language || `Subtitle ${index + 1}`, manualSubtitleTrackIndex === index || (manualSubtitleTrackIndex === null && track.mode === 'showing'), () => {
-        manualSubtitleTrackIndex = index;
-        tracks.forEach((entry, trackIndex) => { try { entry.mode = trackIndex === index ? 'showing' : 'disabled'; } catch { /* Ignore unsupported subtitle controls. */ } });
-      });
-    });
-  }
+  });
+  addOption('Off', manualSubtitleTrack === 'off' || (manualSubtitleTrack === null && !tracks.some((choice) => choice.source === 'html' && choice.track?.mode === 'showing')), () => {
+    manualSubtitleTrack = 'off';
+    tracks.forEach((choice) => { if (choice.source === 'html' && choice.track) choice.track.mode = 'disabled'; });
+    if (webOsSubtitleAdapter.availableTracks.length) void webOsSubtitleAdapter.select(null).catch(() => undefined);
+  });
+  tracks.forEach((choice) => {
+    const selected = manualSubtitleTrack !== 'off' && (manualSubtitleTrack
+      ? manualSubtitleTrack.source === choice.source && manualSubtitleTrack.index === choice.index
+      : choice.source === 'html' && choice.track?.mode === 'showing');
+    addOption(choice.label, selected, () => selectSubtitleTrack(choice, true));
+  });
 }
 
-function showTrackMenu(type: 'audio' | 'subtitles'): void {
-  const tracks = type === 'audio' ? tracksOf(audioTrackList()) : subtitleTracks();
+function showTrackMenu(): void {
+  applyPreferredTracks();
+  const tracks = subtitleTracks();
   if (!tracks.length) {
-    playerMessage.textContent = `No ${type === 'audio' ? 'audio' : 'subtitle'} tracks are exposed by this stream.`;
+    playerMessage.textContent = 'No selectable subtitles were found. This TV supports external WebVTT subtitles; embedded subtitle support depends on the stream and TV media pipeline.';
     return;
   }
-  openTrackMenu = type;
-  renderTrackMenu(type);
+  openTrackMenu = true;
+  renderTrackMenu();
   trackMenu.classList.remove('hidden');
   trackOptions.querySelector<HTMLButtonElement>('.selected')?.focus();
 }
@@ -1262,13 +1461,11 @@ function startEpisodeCountdown(): void {
 }
 
 function saveTrackPreferences(): void {
-  preferredAudioLanguages = audioLanguagePreferencesInput.value ? [audioLanguagePreferencesInput.value] : [];
   preferredSubtitleLanguages = subtitleLanguagePreferencesInput.value ? [subtitleLanguagePreferencesInput.value] : [];
   try {
-    localStorage.setItem(TRACK_PREFERENCES_KEY, JSON.stringify({ audio: preferredAudioLanguages, subtitles: preferredSubtitleLanguages }));
+    localStorage.setItem(profileStorageKey(TRACK_PREFERENCES_KEY), JSON.stringify({ subtitles: preferredSubtitleLanguages }));
   } catch { /* Track preferences remain active for this session. */ }
-  manualAudioTrackIndex = null;
-  manualSubtitleTrackIndex = null;
+  manualSubtitleTrack = null;
   applyPreferredTracks();
 }
 
@@ -1280,13 +1477,10 @@ function populateLanguagePreferences(): void {
     ['el', 'Greek'], ['he', 'Hebrew'], ['hi', 'Hindi'], ['cs', 'Czech'], ['ro', 'Romanian'],
     ['hu', 'Hungarian'], ['ja', 'Japanese'], ['ko', 'Korean'], ['zh', 'Chinese']
   ];
-  clearChildren(audioLanguagePreferencesInput);
   clearChildren(subtitleLanguagePreferencesInput);
-  audioLanguagePreferencesInput.appendChild(new Option('Provider default', ''));
   subtitleLanguagePreferencesInput.appendChild(new Option('Off / no preference', ''));
   for (const [code, label] of languages) {
     const option = `${label} (${code})`;
-    audioLanguagePreferencesInput.appendChild(new Option(option, code));
     subtitleLanguagePreferencesInput.appendChild(new Option(option, code));
   }
 }
@@ -1321,8 +1515,11 @@ function saveWatchProgress(force = false, completed = false): void {
     if (position < 8 && !existing) return;
     const entry: WatchProgress = { ...currentVodEntry, position, duration, updatedAt: now };
     currentVodEntry = entry;
-    watchHistory = [entry, ...watchHistory.filter((item) => item.key !== entry.key)]
-      .sort((left, right) => right.updatedAt - left.updatedAt).slice(0, 40);
+    const orderedHistory = [entry, ...watchHistory.filter((item) => item.key !== entry.key)]
+      .sort((left, right) => right.updatedAt - left.updatedAt);
+    const otherProfiles = orderedHistory.filter((item) => item.scope !== entry.scope);
+    const currentProfile = orderedHistory.filter((item) => item.scope === entry.scope).slice(0, 40);
+    watchHistory = [...currentProfile, ...otherProfiles].slice(0, 320);
   }
   persistWatchHistory();
   if (currentPage === 'home') renderContinueWatching();
@@ -1381,7 +1578,7 @@ function favoriteKey(kind: 'movie' | 'series', id: number | string): string {
 }
 
 function saveFavorites(): void {
-  try { localStorage.setItem(FAVORITES_KEY, JSON.stringify(Array.from(favorites))); } catch { /* Keep favorites in memory for this session. */ }
+  try { localStorage.setItem(profileStorageKey(FAVORITES_KEY), JSON.stringify(Array.from(favorites))); } catch { /* Keep favorites in memory for this session. */ }
 }
 
 function toggleFavorite(kind: 'movie' | 'series', id: number | string): void {
@@ -1459,6 +1656,87 @@ function renderPosterRow(container: HTMLElement, kind: 'movie' | 'series', items
   }
 }
 
+function categorySignal(view: CatalogView, categoryId?: string | number): string {
+  if (categoryId === undefined) return '';
+  const category = categoriesFor(view).find((entry) => String(entry.category_id) === String(categoryId));
+  return category?.category_name?.trim().toLocaleLowerCase() ?? '';
+}
+
+function renderRecommendations(): void {
+  clearChildren(homeRecommended);
+  const signalWeights = new Map<string, number>();
+  const addSignal = (signal: string, amount: number): void => {
+    const normalized = signal.trim().toLocaleLowerCase();
+    if (normalized) signalWeights.set(normalized, (signalWeights.get(normalized) ?? 0) + amount);
+  };
+  const scopeHistory = watchHistory.filter((entry) => entry.scope === watchScope);
+  for (const entry of scopeHistory) {
+    addSignal(entry.genre ?? '', 3);
+    addSignal(categorySignal(entry.kind === 'movie' ? 'movies' : 'series', entry.categoryId), 2);
+    if (entry.seriesId) {
+      const show = series.find((candidate) => String(candidate.series_id) === entry.seriesId);
+      for (const genre of show?.genre?.split(/[,/|]/) ?? []) addSignal(genre, 3);
+    }
+  }
+  for (const key of favorites) {
+    const [kind, ...idParts] = key.split(':');
+    const id = idParts.join(':');
+    if (kind === 'movie') {
+      const item = movies.find((candidate) => String(candidate.stream_id) === id);
+      addSignal(categorySignal('movies', item?.category_id), 4);
+    } else if (kind === 'series') {
+      const item = series.find((candidate) => String(candidate.series_id) === id);
+      addSignal(categorySignal('series', item?.category_id), 4);
+      for (const genre of item?.genre?.split(/[,/|]/) ?? []) addSignal(genre, 4);
+    }
+  }
+
+  const seen = new Set(scopeHistory.map((entry) => `${entry.kind}:${entry.id}`));
+  const candidates: Array<{ kind: 'movie' | 'series'; item: Movie | Series; score: number; order: number }> = [];
+  movies.forEach((item, order) => {
+    if (!item.name || !isCategoryEnabled('movies', item.category_id) || favorites.has(favoriteKey('movie', item.stream_id))
+      || seen.has(`movie:${item.stream_id}`)) return;
+    const signal = categorySignal('movies', item.category_id);
+    candidates.push({ kind: 'movie', item, score: (signalWeights.get(signal) ?? 0) * 10 + (Number(item.rating) || 0), order });
+  });
+  series.forEach((item, order) => {
+    if (!item.name || !isCategoryEnabled('series', item.category_id) || favorites.has(favoriteKey('series', item.series_id))
+      || seen.has(`series:${item.series_id}`)) return;
+    const signals = [categorySignal('series', item.category_id), ...(item.genre?.split(/[,/|]/) ?? [])]
+      .map((signal) => signal.trim().toLocaleLowerCase()).filter(Boolean);
+    const score = signals.reduce((sum, signal) => sum + (signalWeights.get(signal) ?? 0) * 10, 0) + (Number(item.rating) || 0);
+    candidates.push({ kind: 'series', item, score, order: movies.length + order });
+  });
+  candidates.sort((left, right) => right.score - left.score || left.order - right.order);
+  const picks = candidates.slice(0, 12);
+  recommendedRow.classList.toggle('hidden', picks.length === 0);
+  for (const pick of picks) {
+    const item = pick.item as Movie & Series;
+    const title = item.name ?? 'Untitled';
+    const posterUrl = pick.kind === 'movie' ? (item as Movie).stream_icon : (item as Series).cover;
+    const button = document.createElement('button');
+    button.className = 'poster-tile';
+    button.type = 'button';
+    button.setAttribute('aria-label', `Recommended ${pick.kind}: ${title}`);
+    if (posterUrl) {
+      const image = document.createElement('img');
+      image.src = posterUrl;
+      image.alt = '';
+      image.setAttribute('loading', 'lazy');
+      image.addEventListener('error', () => image.classList.add('hidden'));
+      button.appendChild(image);
+    }
+    const label = document.createElement('span');
+    label.textContent = truncateCardTitle(title, 22);
+    label.title = title;
+    button.appendChild(label);
+    button.addEventListener('click', () => pick.kind === 'movie'
+      ? showMovieDetails(pick.item as Movie)
+      : showSeriesDetails(pick.item as Series));
+    homeRecommended.appendChild(button);
+  }
+}
+
 function renderHome(): void {
   const firstMovie = movies.find((item) => isCategoryEnabled('movies', item.category_id));
   const firstSeries = series.find((item) => isCategoryEnabled('series', item.category_id));
@@ -1486,6 +1764,7 @@ function renderHome(): void {
   renderPosterRow(homeMovies, 'movie', movies.slice().sort((a, b) => Number(b.added ?? 0) - Number(a.added ?? 0)));
   renderPosterRow(homeSeries, 'series', series);
   renderContinueWatching();
+  renderRecommendations();
 }
 
 function renderMyList(): void {
@@ -1582,6 +1861,7 @@ function showPage(page: AppPage): void {
   if (page === 'settings') renderCategorySettings();
   if (page === 'settings') renderEpgMappingResults();
   if (page === 'my-list') renderMyList();
+  syncLivePreviewVisibility();
   const selectedNavPage = page === 'detail' ? previousPage : page;
   document.querySelectorAll<HTMLButtonElement>('.nav-button').forEach((button) => button.classList.toggle('active', button.dataset.page === selectedNavPage));
   syncAllDropdowns();
@@ -1608,6 +1888,24 @@ function updateCatalogHeading(): void {
   }
   const categoryControl = dropdownControls.get(categorySelect);
   if (categoryControl) syncDropdown(categoryControl);
+  syncLivePreviewVisibility();
+}
+
+function syncLivePreviewVisibility(): void {
+  const shouldShow = currentPage === 'live' && catalogView === 'live' && !activeSeries
+    && !librarySection.classList.contains('hidden');
+  livePreview.classList.toggle('hidden', !shouldShow);
+  if (!shouldShow && video.parentElement === livePreview) {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    webOsSubtitleAdapter.stop();
+    moveVideoToPlayer();
+    livePreviewTitle.textContent = 'Select a channel';
+    livePreviewMessage.textContent = 'Choose a channel to start the preview.';
+    selectedChannel = null;
+    returnToLivePreviewOnPlayerClose = false;
+  }
 }
 
 function showCatalog(cachedAt?: number): void {
@@ -1719,7 +2017,9 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     if (sourceType === 'xtream' && (!username || !password)) throw new Error('Enter both username and password.');
     credentials = { base, username, password };
     cacheKey = sourceType === 'm3u' ? m3uCatalogKey(base) : catalogKey(base, username);
-    watchScope = m3uCatalogKey(cacheKey);
+    catalogCacheKey = cacheKey;
+    watchScope = profileScopeForCatalog(cacheKey);
+    migrateLegacyWatchHistory(cacheKey);
     loadHiddenCategories(cacheKey);
     epgFetchController?.abort();
     window.clearTimeout(epgRefreshTimer);
@@ -1853,7 +2153,7 @@ function renderChannels(append = false): void {
   const items: Array<{ title: string; poster?: string; meta?: string; secondary?: string; channel?: Channel; onSelect: () => void }> = [];
   if (catalogView === 'live' && !activeSeries) {
     for (const channel of visibleChannels) {
-      items.push({ title: channel.name ?? 'Unknown channel', meta: String(channel.num ?? 'Live TV'), secondary: liveProgramSummary(channel), channel, onSelect: () => playChannel(channel) });
+      items.push({ title: channel.name ?? 'Unknown channel', meta: String(channel.num ?? 'Live TV'), secondary: liveProgramSummary(channel), channel, onSelect: () => selectLiveChannel(channel) });
     }
   } else if (activeSeries) {
     for (const episode of seriesEpisodes) {
@@ -1973,7 +2273,7 @@ function guideChannels(): Channel[] {
 }
 
 function formatGuideTime(timestamp: number): string {
-  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return new Date(timestamp).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
 function guideArchiveDays(channel: Channel): number {
@@ -2102,20 +2402,27 @@ function renderEpgGuide(): void {
   if (!pageChannels.length) {
     epgGuideStatus.textContent = 'No channels match the current Live TV filters.';
   } else if (epgPrograms.length) {
-    epgGuideStatus.textContent = `${epgPrograms.length.toLocaleString()} cached programs · now to 24 hours ahead`;
+    epgGuideStatus.textContent = `${epgPrograms.length.toLocaleString()} cached programs · next 4 hours`;
   }
   updateEpgNowLines();
 }
 
-async function openEpgGuide(): Promise<void> {
-  const listedChannels = guideChannels();
-  const channelToPreview = selectedChannel ?? listedChannels[0];
-  if (!selectedChannel && channelToPreview) await playChannel(channelToPreview);
+async function openEpgGuide(preferredChannel?: Channel): Promise<void> {
   if (!channels.length) {
     libraryMessage.textContent = 'Load live channels before opening the TV Guide.';
     libraryMessage.classList.remove('hidden', 'loading');
     return;
   }
+  const listedChannels = guideChannels();
+  const channelToPreview = preferredChannel ?? selectedChannel ?? listedChannels[0];
+  guideReturnsToLivePreview = playerLayer.classList.contains('hidden')
+    && currentPage === 'live' && catalogView === 'live' && !activeSeries;
+  guideReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  if (channelToPreview && (!selectedChannel || String(channelToPreview.stream_id) !== String(selectedChannel.stream_id))) {
+    void playChannel(channelToPreview, 'preview');
+  }
+  epgPreviewVideo.appendChild(video);
+  livePreview.classList.add('hidden');
   playerLayer.classList.add('guide-mode');
   playerLayer.classList.remove('hidden');
   epgProgramDetail.classList.add('hidden');
@@ -2126,7 +2433,7 @@ async function openEpgGuide(): Promise<void> {
   epgClockTimer = window.setInterval(updateEpgNowLines, 60_000);
   (epgGrid.querySelector<HTMLButtonElement>('button.epg-channel-cell, .epg-program') ?? $('close-guide')).focus();
   if (!epgPrograms.length) epgGuideStatus.textContent = 'Loading cached or provider guide data…';
-  await refreshEpg(false);
+  await refreshEpg(false, true);
   if (sourceType === 'xtream' && guideChannels().length && !guideChannels().slice((epgPage - 1) * EPG_CHANNELS_PER_PAGE, epgPage * EPG_CHANNELS_PER_PAGE).every((channel) => programsForChannel(channel).length)) {
     await loadProviderEpgForCurrentPage();
     renderEpgGuide();
@@ -2139,7 +2446,20 @@ function closeEpgGuide(): void {
   epgClockTimer = 0;
   epgProgramDetail.classList.add('hidden');
   playerLayer.classList.remove('guide-mode');
-  playerGuideButton.focus();
+  if (guideReturnsToLivePreview && selectedChannel && currentPage === 'live' && catalogView === 'live') {
+    livePreviewTitle.textContent = selectedChannel.name ?? 'Live TV';
+    livePreview.appendChild(video);
+    livePreview.classList.remove('hidden');
+    playerLayer.classList.add('hidden');
+    returnToLivePreviewOnPlayerClose = true;
+    if (guideReturnFocus?.isConnected) guideReturnFocus.focus();
+    else channelList.querySelector<HTMLButtonElement>('.channel-card')?.focus();
+  } else {
+    moveVideoToPlayer();
+    playerGuideButton.focus();
+  }
+  guideReturnsToLivePreview = false;
+  guideReturnFocus = null;
 }
 
 async function playEpgProgramLive(): Promise<void> {
@@ -2200,16 +2520,40 @@ async function openSeries(item: Series): Promise<void> {
   }
 }
 
-async function playChannel(channel: Channel): Promise<void> {
+function moveVideoToPlayer(): void {
+  if (video.parentElement !== playerLayer) playerLayer.insertBefore(video, playerLayer.firstChild);
+}
+
+function showLiveChannelFullscreen(): void {
+  if (!selectedChannel) return;
+  moveVideoToPlayer();
+  livePreview.classList.add('hidden');
+  playerLayer.classList.remove('guide-mode', 'hidden');
+  returnToLivePreviewOnPlayerClose = currentPage === 'live' && catalogView === 'live' && !activeSeries;
+  playPauseButton.focus();
+}
+
+function selectLiveChannel(channel: Channel): void {
+  const samePreview = selectedChannel
+    && String(selectedChannel.stream_id) === String(channel.stream_id)
+    && video.parentElement === livePreview;
+  if (samePreview) {
+    showLiveChannelFullscreen();
+    return;
+  }
+  void playChannel(channel, 'preview');
+}
+
+async function playChannel(channel: Channel, display: 'fullscreen' | 'preview' = 'fullscreen'): Promise<void> {
   if (!credentials) return;
   if (channel.stream_url) {
-    await startPlayback(channel.name ?? 'Live TV', channel.stream_url, channel);
+    await startPlayback(channel.name ?? 'Live TV', channel.stream_url, channel, undefined, display);
     return;
   }
   const ext = activeLiveFormat ?? 'ts';
   const path = ['live', credentials.username, credentials.password, `${channel.stream_id}.${ext}`]
     .map((part) => encodeURIComponent(part)).join('/');
-  await startPlayback(channel.name ?? 'Live TV', `${playbackBase ?? credentials.base}/${path}`, channel);
+  await startPlayback(channel.name ?? 'Live TV', `${playbackBase ?? credentials.base}/${path}`, channel, undefined, display);
 }
 
 async function playVod(
@@ -2254,7 +2598,8 @@ async function playVod(
     episodeNumber: matchingHistory?.episodeNumber ?? (episode?.episode_num === undefined ? undefined : String(episode.episode_num)),
     position: matchingHistory?.position ?? 0,
     duration: matchingHistory?.duration ?? 0,
-    updatedAt: matchingHistory?.updatedAt ?? Date.now()
+    updatedAt: matchingHistory?.updatedAt ?? Date.now(),
+    genre: matchingHistory?.genre ?? activeSeries?.genre
   };
   const path = [kind, credentials.username, credentials.password, `${id}.${safeExtension}`]
     .map((part) => encodeURIComponent(part)).join('/');
@@ -2268,17 +2613,31 @@ async function startPlayback(
   title: string,
   url: string,
   channel: Channel | null,
-  resume?: { entry: WatchProgress; position: number }
+  resume?: { entry: WatchProgress; position: number },
+  display: 'fullscreen' | 'preview' = 'fullscreen'
 ): Promise<void> {
   saveWatchProgress(true);
   stopSeekHold();
   stopEpisodeCountdown();
   closeTrackMenu(false);
-  manualAudioTrackIndex = null;
-  manualSubtitleTrackIndex = null;
+  webOsSubtitleAdapter.stop();
+  manualSubtitleTrack = null;
   playingTitle.textContent = title;
   playerMessage.textContent = 'Connecting to stream…';
-  playerLayer.classList.remove('hidden');
+  playerLayer.classList.remove('guide-mode');
+  livePreviewTitle.textContent = title;
+  livePreviewMessage.textContent = display === 'preview' ? 'Connecting to channel…' : '';
+  if (display === 'preview' && channel) {
+    livePreview.appendChild(video);
+    livePreview.classList.remove('hidden');
+    playerLayer.classList.add('hidden');
+    returnToLivePreviewOnPlayerClose = true;
+  } else {
+    moveVideoToPlayer();
+    livePreview.classList.add('hidden');
+    playerLayer.classList.remove('hidden');
+    returnToLivePreviewOnPlayerClose = !!channel && currentPage === 'live' && catalogView === 'live' && !activeSeries;
+  }
   seekRow.classList.add('hidden');
   updatePlayPauseControl(false);
   video.pause();
@@ -2306,9 +2665,11 @@ async function startPlayback(
   try {
     await video.play();
     playerMessage.textContent = '';
-    playPauseButton.focus();
+    livePreviewMessage.textContent = '';
+    if (display === 'fullscreen') playPauseButton.focus();
   } catch (error) {
     playerMessage.textContent = describePlaybackFailure(error);
+    if (display === 'preview') livePreviewMessage.textContent = playerMessage.textContent;
   }
 }
 
@@ -2372,14 +2733,15 @@ function beginSeekHold(direction: -1 | 1): void {
   }, 350);
 }
 
-function closePlayer(): void {
+function closePlayer(stopPlayback = false): void {
+  const returnToPreview = !stopPlayback && returnToLivePreviewOnPlayerClose && !!selectedChannel
+    && currentPage === 'live' && catalogView === 'live' && !activeSeries
+    && !librarySection.classList.contains('hidden');
   saveWatchProgress(true);
+  if (!returnToPreview) webOsSubtitleAdapter.stop();
   stopSeekHold();
   stopEpisodeCountdown();
   closeTrackMenu(false);
-  video.pause();
-  video.removeAttribute('src');
-  video.load();
   window.clearInterval(epgClockTimer);
   epgClockTimer = 0;
   epgGuide.classList.add('hidden');
@@ -2389,10 +2751,27 @@ function closePlayer(): void {
   playerMessage.textContent = '';
   currentVodEntry = null;
   seekRow.classList.add('hidden');
-  selectedChannel = null;
-  if (!librarySection.classList.contains('hidden')) channelList.querySelector<HTMLButtonElement>('button')?.focus();
-  else if (!detailView.classList.contains('hidden')) detailPlayButton.focus();
-  else document.querySelector<HTMLButtonElement>(`.nav-button[data-page="${currentPage === 'detail' ? previousPage : currentPage}"]`)?.focus();
+  if (returnToPreview && selectedChannel) {
+    livePreviewTitle.textContent = selectedChannel.name ?? 'Live TV';
+    livePreviewMessage.textContent = '';
+    livePreview.appendChild(video);
+    livePreview.classList.remove('hidden');
+    returnToLivePreviewOnPlayerClose = true;
+    const selectedCard = Array.from(channelList.querySelectorAll<HTMLButtonElement>('.channel-card'))
+      .find((card) => card.dataset.streamId === String(selectedChannel?.stream_id));
+    (selectedCard ?? channelList.querySelector<HTMLButtonElement>('.channel-card'))?.focus();
+  } else {
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    moveVideoToPlayer();
+    livePreview.classList.add('hidden');
+    selectedChannel = null;
+    returnToLivePreviewOnPlayerClose = false;
+    if (!librarySection.classList.contains('hidden')) channelList.querySelector<HTMLButtonElement>('button')?.focus();
+    else if (!detailView.classList.contains('hidden')) detailPlayButton.focus();
+    else document.querySelector<HTMLButtonElement>(`.nav-button[data-page="${currentPage === 'detail' ? previousPage : currentPage}"]`)?.focus();
+  }
 }
 
 function switchChannel(direction: -1 | 1): void {
@@ -2418,6 +2797,10 @@ function closeExitPrompt(): void {
 }
 
 function handleBackPress(): void {
+  if (!profileDialog.classList.contains('hidden')) {
+    closeProfilesDialog();
+    return;
+  }
   if (!playerLayer.classList.contains('hidden')) {
     if (!epgGuide.classList.contains('hidden')) {
       closeEpgGuide();
@@ -2530,19 +2913,52 @@ function focusSelectedLanguage(): boolean {
   return true;
 }
 
-function focusTopLeftLibraryAction(): boolean {
+function libraryActionTargets(): HTMLElement[] {
   const actions = Array.from(librarySection.querySelectorAll<HTMLElement>(
     '.library-heading .dropdown-trigger, .library-heading .input-proxy, .library-heading button'
-  )).filter(elementIsVisible);
-  actions.sort((left, right) => {
-    const leftBounds = left.getBoundingClientRect();
-    const rightBounds = right.getBoundingClientRect();
-    const verticalDifference = leftBounds.top - rightBounds.top;
-    return Math.abs(verticalDifference) > 12 ? verticalDifference : leftBounds.left - rightBounds.left;
+  ));
+  const language = dropdownControls.get(languageSelect)?.trigger;
+  if (language && elementIsVisible(language)) actions.push(language);
+  return actions.filter(elementIsVisible);
+}
+
+function focusClosestTopAction(active: HTMLElement): boolean {
+  const bounds = active.getBoundingClientRect();
+  const x = bounds.left + bounds.width / 2;
+  const y = bounds.top + bounds.height / 2;
+  const candidates = libraryActionTargets().filter((candidate) => {
+    const rect = candidate.getBoundingClientRect();
+    return candidate !== active && rect.bottom <= bounds.top + 12;
   });
-  const firstAction = actions[0];
-  if (!firstAction) return false;
-  firstAction.focus();
+  candidates.sort((left, right) => {
+    const a = left.getBoundingClientRect();
+    const b = right.getBoundingClientRect();
+    const score = (rect: DOMRect) => Math.hypot(rect.left + rect.width / 2 - x, y - (rect.top + rect.height / 2));
+    return score(a) - score(b);
+  });
+  if (!candidates[0]) return false;
+  candidates[0].focus();
+  return true;
+}
+
+function focusAdjacentLibraryAction(active: HTMLElement, keyCode: number): boolean {
+  const bounds = active.getBoundingClientRect();
+  const x = bounds.left + bounds.width / 2;
+  const y = bounds.top + bounds.height / 2;
+  let best: HTMLElement | null = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const candidate of libraryActionTargets()) {
+    if (candidate === active) continue;
+    const rect = candidate.getBoundingClientRect();
+    const dx = rect.left + rect.width / 2 - x;
+    const dy = rect.top + rect.height / 2 - y;
+    const primary = keyCode === 37 ? -dx : dx;
+    if (primary <= 0) continue;
+    const score = primary + Math.abs(dy) * 1.6;
+    if (score < bestScore) { best = candidate; bestScore = score; }
+  }
+  if (!best) return false;
+  best.focus();
   return true;
 }
 
@@ -2598,7 +3014,7 @@ function moveDirectionalFocus(keyCode: number): boolean {
       return false;
     }
     if (keyCode === 38) {
-      if (rowIndex === 0) return focusSelectedLanguage() || focusTopLeftLibraryAction();
+      if (rowIndex === 0) return focusClosestTopAction(active);
       const previousRow = rows[rowIndex - 1];
       if (previousRow) {
         const x = active.getBoundingClientRect().left + active.getBoundingClientRect().width / 2;
@@ -2608,7 +3024,7 @@ function moveDirectionalFocus(keyCode: number): boolean {
         target?.focus();
         return !!target;
       }
-      return focusSelectedLanguage() || focusTopLeftLibraryAction();
+      return focusClosestTopAction(active);
     }
     if (keyCode === 40) {
       const nextRow = rows[rowIndex + 1];
@@ -2639,17 +3055,22 @@ function moveDirectionalFocus(keyCode: number): boolean {
   if (active === languageTrigger && keyCode === 38) return focusBestGeometricCandidate(active, keyCode);
   if (active.classList.contains('nav-button') && keyCode === 39) return focusFirstContentItem();
   if (active.classList.contains('sidebar-toggle') && keyCode === 39) return focusFirstContentItem();
+  if ((keyCode === 37 || keyCode === 39) && libraryActionTargets().includes(active)) {
+    return focusAdjacentLibraryAction(active, keyCode) || (keyCode === 37 && focusActiveSidebarItem());
+  }
   if (active.classList.contains('dropdown-trigger') && activeDropdown) return false;
   return focusBestGeometricCandidate(active, keyCode);
 }
 
 function disconnect(): void {
-  closePlayer();
+  closePlayer(true);
   epgFetchController?.abort();
   epgFetchController = null;
   window.clearTimeout(epgRefreshTimer);
   requestController?.abort();
   credentials = null;
+  catalogCacheKey = '';
+  watchScope = activeProfileId;
   playbackBase = null;
   activeLiveFormat = null;
   categories = [];
@@ -2735,7 +3156,7 @@ nextPageButton.addEventListener('click', () => {
   renderChannels();
   focusFirstContentItem();
 });
-openGuideButton.addEventListener('click', () => { void openEpgGuide(); });
+openGuideButton.addEventListener('click', () => { void openEpgGuide(visibleChannels[0]); });
 playerGuideButton.addEventListener('click', () => { void openEpgGuide(); });
 $('close-guide').addEventListener('click', closeEpgGuide);
 epgPagePrevious.addEventListener('click', () => {
@@ -2851,13 +3272,12 @@ $('hide-all-categories').addEventListener('click', () => {
   renderHome();
 });
 $('disconnect-button').addEventListener('click', disconnect);
-$('close-player').addEventListener('click', closePlayer);
+$('close-player').addEventListener('click', () => closePlayer());
 previousChannelButton.addEventListener('click', () => switchChannel(-1));
 nextChannelButton.addEventListener('click', () => switchChannel(1));
 seekBackButton.addEventListener('click', () => seekBy(-10));
 seekForwardButton.addEventListener('click', () => seekBy(10));
-audioTracksButton.addEventListener('click', () => showTrackMenu('audio'));
-subtitleTracksButton.addEventListener('click', () => showTrackMenu('subtitles'));
+subtitleTracksButton.addEventListener('click', showTrackMenu);
 nextEpisodePlayButton.addEventListener('click', () => {
   const episode = nextEpisode;
   stopEpisodeCountdown();
@@ -2867,7 +3287,6 @@ nextEpisodeCancelButton.addEventListener('click', () => {
   stopEpisodeCountdown();
   playerMessage.textContent = 'Episode ended.';
 });
-audioLanguagePreferencesInput.addEventListener('change', saveTrackPreferences);
 subtitleLanguagePreferencesInput.addEventListener('change', saveTrackPreferences);
 playPauseButton.addEventListener('click', () => {
   if (video.paused) void video.play().catch(() => { playerMessage.textContent = 'Playback could not resume.'; });
@@ -2881,6 +3300,7 @@ seekBar.addEventListener('input', () => {
 video.addEventListener('loadedmetadata', () => {
   updateSeekControls();
   observeAvailableTracks();
+  webOsSubtitleAdapter.start(video, () => applyPreferredTracks());
   applyPreferredTracks();
 });
 video.addEventListener('durationchange', updateSeekControls);
@@ -2888,16 +3308,25 @@ video.addEventListener('timeupdate', () => {
   updateSeekControls();
   saveWatchProgress();
 });
-video.addEventListener('playing', () => { playerMessage.textContent = ''; updatePlayPauseControl(true); });
+video.addEventListener('playing', () => {
+  playerMessage.textContent = '';
+  if (video.parentElement === livePreview) livePreviewMessage.textContent = '';
+  updatePlayPauseControl(true);
+});
 video.addEventListener('pause', () => updatePlayPauseControl(false));
 video.addEventListener('ended', () => {
   saveWatchProgress(true, true);
   startEpisodeCountdown();
 });
 video.addEventListener('seeked', updateSeekControls);
-video.addEventListener('waiting', () => { playerMessage.textContent = 'Buffering…'; });
+video.addEventListener('waiting', () => {
+  playerMessage.textContent = 'Buffering…';
+  if (video.parentElement === livePreview) livePreviewMessage.textContent = 'Buffering…';
+});
 video.addEventListener('error', () => {
-  if (!playerLayer.classList.contains('hidden')) playerMessage.textContent = describePlaybackFailure();
+  const error = describePlaybackFailure();
+  if (!playerLayer.classList.contains('hidden')) playerMessage.textContent = error;
+  if (video.parentElement === livePreview) livePreviewMessage.textContent = error;
 });
 
 window.addEventListener('keydown', (event) => {
@@ -3035,21 +3464,19 @@ window.addEventListener('keyup', (event) => {
 
 $('stay-button').addEventListener('click', closeExitPrompt);
 $('exit-button').addEventListener('click', exitApplication);
+$('close-profiles').addEventListener('click', closeProfilesDialog);
+$('add-profile').addEventListener('click', addViewerProfile);
+profileSwitchButton.addEventListener('click', openProfilesDialog);
 
 try {
-  const savedFavorites = JSON.parse(localStorage.getItem(FAVORITES_KEY) ?? '[]') as unknown;
-  if (Array.isArray(savedFavorites)) favorites = new Set(savedFavorites.map(String));
+  initializeProfiles();
+  watchScope = activeProfileId;
+  loadFavoritesForProfile(true);
   sidebar.classList.toggle('collapsed', localStorage.getItem('nextflix.sidebar-collapsed.v1') === 'true');
 } catch { /* Defaults are used when local storage is unavailable. */ }
 loadWatchHistory();
 populateLanguagePreferences();
-try {
-  const savedTrackPreferences = JSON.parse(localStorage.getItem(TRACK_PREFERENCES_KEY) ?? 'null') as { audio?: unknown; subtitles?: unknown } | null;
-  if (Array.isArray(savedTrackPreferences?.audio)) preferredAudioLanguages = savedTrackPreferences.audio.map(String).filter(Boolean).slice(0, 1);
-  if (Array.isArray(savedTrackPreferences?.subtitles)) preferredSubtitleLanguages = savedTrackPreferences.subtitles.map(String).filter(Boolean).slice(0, 1);
-} catch { /* Use the built-in language preference order. */ }
-audioLanguagePreferencesInput.value = preferredAudioLanguages[0] ?? '';
-subtitleLanguagePreferencesInput.value = preferredSubtitleLanguages[0] ?? '';
+loadTrackPreferencesForProfile();
 
 const savedProvider = readSavedProvider();
 const localProvider = {

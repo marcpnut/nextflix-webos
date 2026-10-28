@@ -1,0 +1,16 @@
+{
+  "id": "com.nextflix.iptv",
+  "version": "0.5.0",
+  "type": "web",
+  "title": "NextFlix",
+  "appDescription": "A lightweight Xtream IPTV player with local viewer profiles, Live TV guide, and subtitle controls.",
+  "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/largeIcon.png",
+  "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
+  "rootRequired": false,
+  "ipkUrl": "https://github.com/marcpnut/nextflix-webos/releases/download/v0.5.0/com.nextflix.iptv_0.5.0_all.ipk",
+  "ipkHash": {
+    "sha256": "d48090ab8f261bd7f0310906cbbe3fbe8f4c89d4b208d44f1e8900172664a140"
+  },
+  "ipkSize": 52540,
+  "installedSize": 159059
+}

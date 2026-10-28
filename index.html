@@ -51,6 +51,10 @@
               <button data-page="my-list" aria-label="My List" class="nav-button"><img class="nav-icon" src="icons/my-list.png" alt="" /><span>My List</span></button>
               <button data-page="settings" aria-label="Settings" class="nav-button"><img class="nav-icon" src="icons/settings.png" alt="" /><span>Settings</span></button>
             </nav>
+            <div class="sidebar-profile">
+              <span class="sidebar-profile-caption">VIEWER</span><strong id="active-profile-name">Default</strong>
+              <button id="profile-switch" class="quiet" aria-label="Switch viewer profile">Switch profile</button>
+            </div>
           </aside>
           <div class="app-content">
             <div id="language-filter" class="language-filter hidden" aria-label="Filter categories by language"><label>Language<select id="language-select"></select></label></div>
@@ -60,6 +64,7 @@
                 <div class="hero-copy"><div class="eyebrow">FEATURED</div><h1 id="hero-title">Your IPTV library</h1><p id="hero-description">Your movies and series appear here when the catalog has loaded.</p><div class="hero-actions"><button id="hero-play" class="primary">Play</button><button id="hero-browse" class="quiet">Browse movies</button></div></div>
               </div>
               <section id="continue-row" class="home-row hidden"><h2>Continue Watching</h2><div id="home-continue" class="poster-row"></div></section>
+              <section id="recommended-row" class="home-row hidden"><h2>Recommended For You</h2><div id="home-recommended" class="poster-row"></div></section>
               <section class="home-row"><h2>Recently Added Movies</h2><div id="home-movies" class="poster-row"></div></section>
               <section class="home-row"><h2>Popular Series</h2><div id="home-series" class="poster-row"></div></section>
             </section>
@@ -74,8 +79,7 @@
               <label class="settings-type-label">Category group<select id="settings-category-type"><option value="live">Live TV</option><option value="movies">Movies</option><option value="series">Series</option></select></label>
               <section class="track-preferences" aria-labelledby="track-preferences-title">
                 <h2 id="track-preferences-title">Playback languages</h2>
-                <p class="muted">Choose preferred languages. Subtitles stay off if the selected language is unavailable.</p>
-                <label>Preferred audio language<select id="audio-language-preferences"></select></label>
+                <p class="muted">NextFlix keeps the provider’s main/default audio track. Choose a preferred subtitle language; subtitles stay off if it is unavailable.</p>
                 <label>Preferred subtitle language<select id="subtitle-language-preferences"></select></label>
               </section>
               <div class="settings-actions"><button id="show-all-categories">Show all</button><button id="hide-all-categories">Hide all</button></div>
@@ -100,6 +104,9 @@
             <section id="my-list-view" class="my-list-view hidden"><div class="eyebrow">SAVED TITLES</div><h1>My List</h1><div id="my-list-items" class="channel-list"></div></section>
 
             <section id="library" class="library hidden" aria-label="Media catalogue">
+          <section id="live-preview" class="live-preview hidden" aria-label="Selected Live TV channel preview">
+            <div class="live-preview-status"><span class="eyebrow">LIVE TV PREVIEW</span><strong id="live-preview-title">Select a channel</strong><span id="live-preview-message" role="status" aria-live="polite">Choose a channel to start the preview.</span><span class="live-preview-hint">Select the same channel again to watch full screen.</span></div>
+          </section>
           <div class="library-heading">
             <div>
               <div class="eyebrow">CATALOG</div>
@@ -134,6 +141,17 @@
         </div>
       </section>
 
+      <section id="profiles-dialog" class="dialog-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="profiles-title">
+        <div class="confirm-dialog profiles-dialog">
+          <h2 id="profiles-title">Choose a viewer</h2>
+          <p class="muted">Each viewer has a separate My List, watch history, progress, subtitle preference, and recommendations.</p>
+          <div id="profiles-list" class="profiles-list"></div>
+          <label>New profile<input id="profile-name" type="text" maxlength="24" placeholder="Profile name" autocomplete="off" /></label>
+          <div id="profile-message" class="message" role="status" aria-live="polite"></div>
+          <div class="confirm-actions"><button id="add-profile" class="primary">Add profile</button><button id="close-profiles" class="quiet">Close</button></div>
+        </div>
+      </section>
+
       <div id="back-hint" class="back-hint hidden" role="status" aria-live="polite"></div>
 
       <section id="player" class="player hidden" aria-label="Video player">
@@ -141,7 +159,7 @@
         <section id="epg-guide" class="epg-guide hidden" aria-label="Live TV guide">
           <header class="epg-guide-header">
             <div><div class="eyebrow">LIVE TV</div><h1>TV Guide</h1><p id="epg-guide-status" role="status" aria-live="polite">Loading guide…</p></div>
-            <div class="epg-preview-label"><span>Now playing</span><strong id="epg-preview-title"></strong></div>
+            <div class="epg-preview-box"><div class="epg-preview-video" id="epg-preview-video"></div><div class="epg-preview-label"><span>Now playing</span><strong id="epg-preview-title"></strong></div></div>
             <button id="close-guide" class="player-icon-button player-back" aria-label="Close guide" title="Close guide"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></button>
           </header>
           <div id="epg-grid-scroll" class="epg-grid-scroll"><div id="epg-grid" class="epg-grid"></div></div>
@@ -165,7 +183,6 @@
             <button id="play-pause" class="player-icon-button play-toggle" aria-label="Pause" title="Pause"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" /></svg></button>
             <button id="next-channel" class="player-icon-button" aria-label="Next channel" title="Next channel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M5 6l9 6-9 6z" /></svg></button>
             <button id="seek-forward" class="player-icon-button hidden" aria-label="Forward 10 seconds" title="Forward 10 seconds"><svg class="skip-icon" viewBox="0 0 40 40" aria-hidden="true"><path d="M29 11V4m0 7h-7m6.5-.5A13 13 0 1 0 31 20" /><text x="13" y="23">10</text></svg></button>
-            <button id="audio-tracks" class="player-icon-button hidden" aria-label="Audio tracks" title="Audio tracks"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4m4-7v10m4-13v16m4-13v10m4-7v4" /></svg></button>
             <button id="subtitle-tracks" class="player-icon-button hidden" aria-label="Subtitles" title="Subtitles"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5l-3 3-3-3H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" /><path d="M6 11h5m2 0h5M6 15h3m3 0h6" /></svg></button>
           </div>
         </div>
