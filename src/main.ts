@@ -157,7 +157,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.11';
+const APP_VERSION = '1.0.12';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -1974,7 +1974,8 @@ function renderContinueWatching(): void {
 
 function truncateCardTitle(title: string, maximum: number): string {
   if (title.length <= maximum) return title;
-  return `${title.slice(0, Math.max(1, maximum - 1)).trimEnd()}…`;
+  // String.prototype.trimEnd is missing in the C9's Chrome 53 WebKit.
+  return `${title.slice(0, Math.max(1, maximum - 1)).replace(/\s+$/, '')}…`;
 }
 
 function favoriteKey(kind: 'movie' | 'series', id: number | string): string {

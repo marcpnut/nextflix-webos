@@ -1,16 +1,16 @@
 {
   "id": "com.nextflix.iptv",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "type": "web",
   "title": "NextFlix",
-  "appDescription": "Remote text editing fix for older webOS TVs.",
+  "appDescription": "Compatibility fix for older webOS catalog rendering and login text editing.",
   "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
   "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
   "rootRequired": false,
-  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.11_all.ipk",
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.12_all.ipk",
   "ipkHash": {
-    "sha256": "954d0458721c8f4f08881c2e0253c15a42b31bdb456fb377ee7faa252f1e6b96"
+    "sha256": "200930ba40c3fefe94f7f60f875fccb3945bde90f3a15944a29eeede005094ae"
   },
-  "ipkSize": 67646,
+  "ipkSize": 67624,
   "installedSize": 205432
 }
