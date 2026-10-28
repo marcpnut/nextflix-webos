@@ -124,6 +124,10 @@ const opensubtitlesKeyInput = $('opensubtitles-key') as HTMLInputElement;
 const metadataSettingsStatus = $('metadata-settings-status');
 const exitConfirm = $('exit-confirm');
 const backHint = $('back-hint');
+const screenLoadingDialog = $('screen-loading');
+const screenLoadingMessage = $('screen-loading-message');
+const screenLoadingDemo = !document.documentElement.classList.contains('webos-tv')
+  && window.location.search.indexOf('loadingDemo=1') >= 0;
 const video = $('video') as HTMLVideoElement;
 const playerMessage = $('player-message');
 const playingTitle = $('playing-title');
@@ -150,7 +154,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.3';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -253,6 +257,9 @@ let selectedChannel: Channel | null = null;
 let returnToLivePreviewOnPlayerClose = false;
 const requestControllers = new Set<AbortController>();
 let providerLoadGeneration = 0;
+let catalogBackgroundLoad: Promise<void> | null = null;
+let screenLoadingTimer = 0;
+let screenLoadingGeneration = 0;
 let backPressCount = 0;
 let backPressResetTimer = 0;
 let backHintTimer = 0;
@@ -2164,6 +2171,37 @@ function renderCategorySettings(): void {
   }
 }
 
+function monitorScreenLoad(work: Promise<unknown>, message: string): void {
+  const generation = ++screenLoadingGeneration;
+  window.clearTimeout(screenLoadingTimer);
+  screenLoadingTimer = 0;
+  screenLoadingDialog.classList.add('hidden');
+  screenLoadingMessage.textContent = message;
+  let task = Promise.resolve(work).then(() => undefined, () => undefined);
+  if (screenLoadingDemo) {
+    const previewDelay = new Promise<void>((resolve) => window.setTimeout(resolve, 3600));
+    task = Promise.all([task, previewDelay]).then(() => undefined);
+  }
+  screenLoadingTimer = window.setTimeout(() => {
+    if (generation === screenLoadingGeneration) screenLoadingDialog.classList.remove('hidden');
+  }, 2000);
+  void task.then(() => {
+    if (generation !== screenLoadingGeneration) return;
+    window.clearTimeout(screenLoadingTimer);
+    screenLoadingTimer = 0;
+    screenLoadingDialog.classList.add('hidden');
+  });
+}
+
+function pendingDataForPage(page: AppPage): Promise<void> | null {
+  if (!catalogBackgroundLoad) return null;
+  if ((page === 'movies' && !movies.length) || (page === 'series' && !series.length)) return catalogBackgroundLoad;
+  if (page === 'home' && !movies.length && !series.length) return catalogBackgroundLoad;
+  if (page === 'my-list' && favorites.size && !movies.length && !series.length) return catalogBackgroundLoad;
+  if (page === 'settings' && !categoriesFor(settingsCategoryType.value as CatalogView).length) return catalogBackgroundLoad;
+  return null;
+}
+
 function showPage(page: AppPage): void {
   const leavingDetail = currentPage === 'detail' && page !== 'detail';
   currentPage = page;
@@ -2197,6 +2235,8 @@ function showPage(page: AppPage): void {
     detailReturnFocus.focus();
     detailReturnFocus = null;
   }
+  const pendingData = pendingDataForPage(page);
+  monitorScreenLoad(pendingData ?? Promise.resolve(), pendingData ? `Loading ${page === 'my-list' ? 'your list' : page}…` : 'Loading your streams…');
 }
 
 function updateCatalogHeading(): void {
@@ -2342,6 +2382,7 @@ async function loadMoviesAndSeries(key: string, generation: number): Promise<voi
 
 async function loadProvider(options: { startup?: boolean } = {}): Promise<void> {
   const generation = ++providerLoadGeneration;
+  catalogBackgroundLoad = null;
   for (const controller of requestControllers) controller.abort();
   requestControllers.clear();
   setBusy(true);
@@ -2458,7 +2499,15 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       libraryMessage.classList.remove('hidden', 'loading');
     }
     document.querySelector<HTMLButtonElement>('.nav-button[data-page="home"]')?.focus();
-    if (sourceType === 'xtream') window.setTimeout(() => { void loadMoviesAndSeries(cacheKey, generation); }, 0);
+    if (sourceType === 'xtream') window.setTimeout(() => {
+      const backgroundLoad = loadMoviesAndSeries(cacheKey, generation);
+      catalogBackgroundLoad = backgroundLoad;
+      void backgroundLoad.then(() => {
+        if (catalogBackgroundLoad === backgroundLoad) catalogBackgroundLoad = null;
+      }, () => {
+        if (catalogBackgroundLoad === backgroundLoad) catalogBackgroundLoad = null;
+      });
+    }, 0);
   } catch (error) {
     if (generation !== providerLoadGeneration) return;
     const safeMessage = error instanceof Error ? error.message : 'Connection failed.';
@@ -2621,8 +2670,10 @@ async function openSeries(item: Series): Promise<void> {
   libraryMessage.textContent = `Loading episodes for ${item.name ?? 'series'}…`;
   libraryMessage.classList.remove('hidden', 'error');
   libraryMessage.classList.add('loading');
+  const episodeLoad = fetchSeriesEpisodes(item.series_id);
+  monitorScreenLoad(episodeLoad, 'Loading episodes…');
   try {
-    seriesEpisodes = await fetchSeriesEpisodes(item.series_id);
+    seriesEpisodes = await episodeLoad;
     renderChannels();
     libraryMessage.textContent = seriesEpisodes.length ? `${seriesEpisodes.length} episodes` : 'No episodes were returned for this series.';
     libraryMessage.classList.remove('loading');
@@ -3684,4 +3735,12 @@ if (localProvider.base && localProvider.username && localProvider.password) {
 setupDropdowns();
 setupInputProxies();
 installScrollCues();
+
+if (screenLoadingDemo) {
+  window.setTimeout(() => {
+    screenLoadingMessage.textContent = 'Please wait while your streams load…';
+    screenLoadingDialog.classList.remove('hidden');
+    window.setTimeout(() => screenLoadingDialog.classList.add('hidden'), 15000);
+  }, 250);
+}
 
