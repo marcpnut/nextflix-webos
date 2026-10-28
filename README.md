@@ -1,4 +1,4 @@
-# NextFlix — Phase 4 in progress
+# NextFlix — Phase 5 EPG implementation (0.4.0)
 
 Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 
@@ -38,6 +38,16 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 - Offer a cancellable 10-second next-episode countdown when the current series episode ends and the next episode is available in the loaded series list.
 - Use a full-screen player overlay with a top back arrow and white icon controls; VOD shows 10-second skip controls and Live TV shows previous/next channel controls.
 - Navigate closed dropdowns with the D-pad; press OK to open one, use Up/Down within its options, and Left/Right to move focus away.
+- Browse Movies and Series in filtered pages of 20 titles, with independent page positions and remote-friendly Previous/Next controls.
+- Use dropdowns in explicit selection mode: OK opens, Up/Down highlights, OK commits, and Back cancels without changing the saved value.
+- Navigate between language, content rows, and the sidebar with a single centralized D-pad handler; moving onto text inputs focuses a proxy until OK opens text editing.
+- Set preferred audio and subtitle languages from supported language lists; selections persist locally and apply when matching tracks are exposed by playback.
+- Find Disconnect only in Settings; browsing and playback no longer expose a normal-view disconnect action.
+- Open the Live TV guide from Live TV or the player while reusing the current video element as a small preview. Moving guide focus never retunes the stream; select a program and choose Watch live to tune it.
+- Parse provider or custom XMLTV data with confident exact-ID/name matching, manual per-channel mappings, a 12-hour IndexedDB cache, seven-day retention, a 16 MB input cap, and an 80,000-program cap.
+- Fall back to Xtream `get_simple_data_table` guide requests when XMLTV is unavailable; provider listings are fetched in small channel batches as pages are visited.
+- Show now/next details in Live TV and an hourly timeline covering the current time through the next 24 hours.
+- Offer Replay or Start Over only when Xtream channel data reports archive support and a valid archive duration.
 - Use locally stored playback progress only; no stream URLs or provider credentials are stored in watch history.
 - Navigate with directional remote keys and get focus return when closing title details.
 - Require three Back presses on Home before showing the exit confirmation; Back closes the player or returns to Home from a subpage.
@@ -78,8 +88,11 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - The channel cache uses IndexedDB and stores rebuildable provider catalogue data, not IPTV credentials. If IndexedDB is unavailable, the app still connects but cannot show the catalogue offline.
 - Remembered credentials use unencrypted app local storage on the TV. The password is visible in this test build.
 - This project targets one IPTV provider at a time; multi-provider merging is intentionally out of scope.
-- Profiles, EPG, catch-up, external subtitle loading, source failover, and local pairing are not implemented yet.
+- Profiles, external subtitle loading, source failover, and local pairing are not implemented yet.
+- The Phase 5 EPG guide and catch-up implementation is new and has not yet been verified against the user's IPTV provider or on the physical TV. XMLTV downloads require provider CORS support; compressed XMLTV files that are not transparently decompressed by the browser are unsupported. The provider API fallback fetches guide data per channel and is intentionally on demand.
+- Catch-up URL construction follows the Xtream timeshift route pattern, but the provider must advertise archive support and accept the requested archive stream. Actual Replay and Start Over remain unverified.
 - Audio/subtitle controls depend on tracks exposed to the ordinary HTML media element by the stream and webOS browser. Multilingual track selection and episode autoplay still need verification on the target TV.
+- LG webOS opens its virtual keyboard when an editable input receives focus. NextFlix avoids that during navigation with focusable proxy buttons; TV testing is needed to verify that the target Pear webOS build consistently delivers the remote Back key while its virtual keyboard is open.
 - An intermittent black screen after returning to NextFlix from Home was reported; it has not been reproduced or verified fixed yet.
 
 ## Checklist
@@ -96,3 +109,6 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - [ ] Test Phase 3 sidebar, detail/search/dropdown focus, filter spacing, poster sizing, My List, category and language filters, and three-press exit on the TV.
 - [ ] Test Phase 4 player icon controls, VOD seeking, resume position, and progress cleanup on completion on the TV.
 - [ ] Test language-filter focus restoration, card-title truncation, audio/subtitle selection, preferred-language behavior, and series autoplay on the TV.
+- [ ] Test 20-item Movies/Series pagination, filtered page counts, dropdown confirm/cancel, input edit/Back behavior, and Disconnect location on the TV.
+- [x] Phase 5 implementation: EPG timeline, cached provider/XMLTV data, manual channel mappings, live preview, and archive-gated replay actions.
+- [ ] Phase 5 TV validation: test guide preview, current/next data, XMLTV and mapping, channel switching, archive Replay/Start Over, and recovery from guide/network errors.

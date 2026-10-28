@@ -2,6 +2,8 @@ import './style.css';
 import {
   readCatalog,
   writeCatalog,
+  readEpgSnapshot,
+  writeEpgSnapshot,
   type CachedCatalog,
   type CatalogCategory as Category,
   type CatalogChannel as Channel,
@@ -9,6 +11,17 @@ import {
   type CatalogSeries as Series,
   type SeriesEpisode
 } from './catalogCache';
+import {
+  EPG_MAX_XML_BYTES,
+  EPG_REFRESH_MS,
+  EPG_RETENTION_MS,
+  findAutomaticEpgChannel,
+  parseProviderEpg,
+  parseXmltv,
+  providerCatchupUrl,
+  type EpgChannel,
+  type EpgProgram
+} from './epg';
 
 type XtreamAuth = {
   user_info?: { auth?: number; status?: string; exp_date?: string | null; allowed_output_formats?: string[] };
@@ -57,6 +70,7 @@ const homeSeries = $('home-series');
 const homeContinue = $('home-continue');
 const continueRow = $('continue-row');
 const languageFilter = $('language-filter');
+const languageSelect = $('language-select') as HTMLSelectElement;
 const detailPoster = $('detail-poster') as HTMLImageElement;
 const detailKind = $('detail-kind');
 const detailTitle = $('detail-title');
@@ -74,8 +88,35 @@ const catalogTypeSelect = $('catalog-type') as HTMLSelectElement;
 const searchInput = $('catalog-search') as HTMLInputElement;
 const backToSeriesButton = $('back-to-series') as HTMLButtonElement;
 const moreButton = $('more-button') as HTMLButtonElement;
+const pagination = $('catalog-pagination');
+const previousPageButton = $('page-previous') as HTMLButtonElement;
+const nextPageButton = $('page-next') as HTMLButtonElement;
+const pageIndicator = $('page-indicator');
 const libraryMessage = $('library-message');
+const openGuideButton = $('open-guide') as HTMLButtonElement;
 const playerLayer = $('player');
+const epgGuide = $('epg-guide');
+const epgGuideStatus = $('epg-guide-status');
+const epgPreviewTitle = $('epg-preview-title');
+const epgGrid = $('epg-grid');
+const epgPagePrevious = $('epg-page-previous') as HTMLButtonElement;
+const epgPageNext = $('epg-page-next') as HTMLButtonElement;
+const epgPageIndicator = $('epg-page-indicator');
+const epgProgramDetail = $('epg-program-detail');
+const epgDetailTitle = $('epg-detail-title');
+const epgDetailTime = $('epg-detail-time');
+const epgDetailDescription = $('epg-detail-description');
+const epgWatchLiveButton = $('epg-watch-live') as HTMLButtonElement;
+const epgReplayButton = $('epg-replay') as HTMLButtonElement;
+const xmltvUrlInput = $('xmltv-url') as HTMLInputElement;
+const saveEpgSettingsButton = $('save-epg-settings') as HTMLButtonElement;
+const epgSettingsStatus = $('epg-settings-status');
+const epgMapChannelSearch = $('epg-map-channel-search') as HTMLInputElement;
+const epgMapSourceSearch = $('epg-map-source-search') as HTMLInputElement;
+const epgMapChannelResults = $('epg-map-channel-results');
+const epgMapSourceResults = $('epg-map-source-results');
+const epgMappingStatus = $('epg-mapping-status');
+const epgClearMappingButton = $('epg-clear-mapping') as HTMLButtonElement;
 const exitConfirm = $('exit-confirm');
 const backHint = $('back-hint');
 const video = $('video') as HTMLVideoElement;
@@ -86,12 +127,13 @@ const seekBackButton = $('seek-back') as HTMLButtonElement;
 const seekForwardButton = $('seek-forward') as HTMLButtonElement;
 const previousChannelButton = $('previous-channel') as HTMLButtonElement;
 const nextChannelButton = $('next-channel') as HTMLButtonElement;
+const playerGuideButton = $('player-guide') as HTMLButtonElement;
 const seekRow = $('seek-row');
 const seekBar = $('seek-bar') as HTMLInputElement;
 const seekCurrent = $('seek-current');
 const seekDuration = $('seek-duration');
-const audioLanguagePreferencesInput = $('audio-language-preferences') as HTMLInputElement;
-const subtitleLanguagePreferencesInput = $('subtitle-language-preferences') as HTMLInputElement;
+const audioLanguagePreferencesInput = $('audio-language-preferences') as HTMLSelectElement;
+const subtitleLanguagePreferencesInput = $('subtitle-language-preferences') as HTMLSelectElement;
 const audioTracksButton = $('audio-tracks') as HTMLButtonElement;
 const subtitleTracksButton = $('subtitle-tracks') as HTMLButtonElement;
 const trackMenu = $('track-menu');
@@ -102,10 +144,11 @@ const nextEpisodeCountdown = $('next-episode-countdown');
 const nextEpisodePlayButton = $('next-episode-play') as HTMLButtonElement;
 const nextEpisodeCancelButton = $('next-episode-cancel') as HTMLButtonElement;
 
-const PAGE_SIZE = 72;
+const PAGE_SIZE = 20;
+const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.3.8';
+const APP_VERSION = '0.4.0';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -116,6 +159,18 @@ let allowedLiveFormats: string[] = [];
 let activeLiveFormat: string | null = null;
 let categories: Category[] = [];
 let channels: Channel[] = [];
+let epgChannels: EpgChannel[] = [];
+let epgPrograms: EpgProgram[] = [];
+let epgProgramIndex = new Map<string, EpgProgram[]>();
+let manualEpgMappings: Record<string, string> = {};
+let selectedEpgMapChannel: Channel | null = null;
+let selectedEpgProgram: { channel: Channel; program?: EpgProgram } | null = null;
+let epgPage = 1;
+let epgCacheKey = '';
+let epgFetchController: AbortController | null = null;
+let epgProviderFetchedChannels = new Set<string>();
+let epgRefreshTimer = 0;
+let epgClockTimer = 0;
 let movieCategories: Category[] = [];
 let movies: Movie[] = [];
 let seriesCategories: Category[] = [];
@@ -136,8 +191,15 @@ let favorites = new Set<string>();
 const FAVORITES_KEY = 'nextflix.my-list.v1';
 const WATCH_HISTORY_KEY = 'nextflix.watch-history.v1';
 const TRACK_PREFERENCES_KEY = 'nextflix.track-preferences.v1';
+const EPG_SETTINGS_KEY = 'nextflix.epg-settings.v1';
+const EPG_MAPPINGS_KEY = 'nextflix.epg-mappings.v1';
+const EPG_CHANNELS_PER_PAGE = 14;
+const EPG_HOUR_WIDTH = 150;
+const EPG_GRID_HOURS = 24;
+const EPG_CHANNEL_FALLBACK_LIMIT = 28;
 type MediaTrack = { language?: string; label?: string; kind?: string; enabled?: boolean; mode?: string };
 type TrackList = { length: number; [index: number]: MediaTrack; addEventListener?: (type: string, listener: EventListener) => void };
+type DropdownControl = { select: HTMLSelectElement; wrapper: HTMLDivElement; trigger: HTMLButtonElement; list: HTMLDivElement; originalValue: string };
 type WatchProgress = {
   key: string;
   scope: string;
@@ -162,6 +224,8 @@ let searchTimer = 0;
 let sourceType: 'xtream' | 'm3u' = 'xtream';
 let visibleChannels: Channel[] = [];
 let renderedCount = 0;
+let catalogPages: Record<'movies' | 'series', number> = { movies: 1, series: 1 };
+let catalogTotalPages = 1;
 let selectedChannel: Channel | null = null;
 let requestController: AbortController | null = null;
 let backPressCount = 0;
@@ -171,9 +235,13 @@ let seekHoldTimer = 0;
 let seekHoldDirection: -1 | 1 | 0 = 0;
 let seekHoldStartedAt = 0;
 let seekHoldLastSignal = 0;
-let openDropdown: HTMLSelectElement | null = null;
-let preferredAudioLanguages = ['en', 'nl'];
-let preferredSubtitleLanguages = ['nl', 'en'];
+let activeDropdown: DropdownControl | null = null;
+let focusedDropdownOption = 0;
+let editingInput: HTMLInputElement | null = null;
+const inputProxies = new Map<HTMLInputElement, HTMLButtonElement>();
+const dropdownControls = new Map<HTMLSelectElement, DropdownControl>();
+let preferredAudioLanguages = ['en'];
+let preferredSubtitleLanguages = ['nl'];
 let manualAudioTrackIndex: number | null = null;
 let manualSubtitleTrackIndex: number | null = null;
 let openTrackMenu: 'audio' | 'subtitles' | null = null;
@@ -253,8 +321,10 @@ function saveCurrentProvider(): boolean {
 function updateSourceTypeControls(): void {
   const playlist = providerTypeSelect.value === 'm3u';
   credentialFields.classList.toggle('hidden', playlist);
-  usernameInput.required = !playlist;
-  passwordInput.required = !playlist;
+  // Hidden native inputs must not trigger browser validation/focus; loadProvider
+  // performs the same checks explicitly before making a request.
+  usernameInput.required = !playlist && !inputProxies.has(usernameInput);
+  passwordInput.required = !playlist && !inputProxies.has(passwordInput);
   serverLabel.textContent = playlist ? 'M3U playlist URL' : 'Server URL';
   serverInput.placeholder = playlist ? 'https://provider.example/playlist.m3u' : 'https://provider.example:8080';
 }
@@ -379,6 +449,234 @@ async function fetchM3U(url: string): Promise<string> {
   }
 }
 
+function indexEpgPrograms(): void {
+  epgProgramIndex = new Map();
+  for (const program of epgPrograms) {
+    const group = epgProgramIndex.get(program.channelId) ?? [];
+    group.push(program);
+    epgProgramIndex.set(program.channelId, group);
+  }
+  epgProgramIndex.forEach((programs) => programs.sort((left, right) => left.start - right.start));
+}
+
+function mappedEpgChannelId(channel: Channel): string | undefined {
+  const manual = manualEpgMappings[String(channel.stream_id)];
+  if (manual && epgProgramIndex.has(manual)) return manual;
+  const automatic = findAutomaticEpgChannel(channel, epgChannels);
+  if (automatic && epgProgramIndex.has(automatic)) return automatic;
+  const providerId = String(channel.stream_id);
+  return epgProgramIndex.has(providerId) ? providerId : undefined;
+}
+
+function programsForChannel(channel: Channel): EpgProgram[] {
+  const id = mappedEpgChannelId(channel);
+  return id ? epgProgramIndex.get(id) ?? [] : [];
+}
+
+function currentProgramForChannel(channel: Channel, at = Date.now()): EpgProgram | undefined {
+  return programsForChannel(channel).find((program) => program.start <= at && program.end > at);
+}
+
+function nextProgramForChannel(channel: Channel, at = Date.now()): EpgProgram | undefined {
+  return programsForChannel(channel).find((program) => program.start > at);
+}
+
+function liveProgramSummary(channel: Channel): string {
+  const now = currentProgramForChannel(channel);
+  const next = nextProgramForChannel(channel, now?.end ?? Date.now());
+  if (!now && !next) return '';
+  return [now ? `Now: ${now.title}` : '', next ? `Next: ${next.title}` : ''].filter(Boolean).join('  ·  ');
+}
+
+function epgSourceHashForCurrentProvider(): string {
+  const source = xmltvUrlInput.value.trim() || (sourceType === 'xtream' ? `${credentials?.base ?? ''}/xmltv.php` : '');
+  return m3uCatalogKey(source || 'no-xmltv-source');
+}
+
+function epgCacheKeyForCurrentSource(): string {
+  return `epg:${watchScope}`;
+}
+
+async function readBoundedText(response: Response): Promise<string> {
+  if (!response.ok) throw new Error(`Guide server returned HTTP ${response.status}.`);
+  if (!response.body?.getReader) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > EPG_MAX_XML_BYTES) throw new Error('Guide file exceeds the 16 MB limit.');
+    return text;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let size = 0;
+  let result = '';
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      size += chunk.value.byteLength;
+      if (size > EPG_MAX_XML_BYTES) {
+        await reader.cancel();
+        throw new Error('Guide file exceeds the 16 MB limit.');
+      }
+      result += decoder.decode(chunk.value, { stream: true });
+    }
+    return result + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function fetchXmltv(url: string, signal: AbortSignal): Promise<{ channels: EpgChannel[]; programs: EpgProgram[] }> {
+  const response = await fetch(url, { headers: { Accept: 'application/xml, text/xml, text/plain, */*' }, cache: 'no-store', signal });
+  const text = await readBoundedText(response);
+  return parseXmltv(text);
+}
+
+function providerXmltvUrl(): string {
+  if (!credentials) throw new Error('Connect to an IPTV provider first.');
+  const url = new URL('xmltv.php', `${credentials.base.replace(/\/+$/, '')}/`);
+  url.searchParams.set('username', credentials.username);
+  url.searchParams.set('password', credentials.password);
+  return url.toString();
+}
+
+async function fetchProviderEpgForChannels(targetChannels: Channel[], signal?: AbortSignal): Promise<number> {
+  if (!credentials || sourceType !== 'xtream') return 0;
+  let added = 0;
+  const total = Math.min(targetChannels.length, EPG_CHANNELS_PER_PAGE);
+  for (const [index, channel] of targetChannels.slice(0, EPG_CHANNELS_PER_PAGE).entries()) {
+    const streamId = String(channel.stream_id);
+    if (signal?.aborted || !credentials) break;
+    if (epgProgramIndex.has(streamId) || epgProviderFetchedChannels.has(streamId)) continue;
+    epgProviderFetchedChannels.add(streamId);
+    epgGuideStatus.textContent = `Loading guide data for ${channel.name ?? 'channel'} (${index + 1} of ${total})…`;
+    try {
+      const response = await api<unknown>('get_simple_data_table', { stream_id: String(channel.stream_id) }, 45_000);
+      const programs = parseProviderEpg(channel.stream_id, response);
+      if (programs.length) {
+        epgPrograms.push(...programs);
+        if (!epgChannels.some((entry) => entry.id === String(channel.stream_id))) {
+          epgChannels.push({ id: String(channel.stream_id), name: channel.name ?? `Channel ${channel.stream_id}` });
+        }
+        added += programs.length;
+        indexEpgPrograms();
+      }
+    } catch {
+      // A provider can omit its EPG action while still allowing XMLTV playback.
+    }
+  }
+  return added;
+}
+
+function scheduleEpgRefresh(): void {
+  window.clearTimeout(epgRefreshTimer);
+  epgRefreshTimer = window.setTimeout(() => { void refreshEpg(true); }, EPG_REFRESH_MS);
+}
+
+async function refreshEpg(force: boolean): Promise<void> {
+  if (!credentials) {
+    epgSettingsStatus.textContent = 'Connect a provider before refreshing the guide.';
+    return;
+  }
+  const key = epgCacheKeyForCurrentSource();
+  if (!force && epgCacheKey !== key) {
+    try {
+      const saved = await readEpgSnapshot(key);
+      if (saved && saved.sourceHash === epgSourceHashForCurrentProvider() && Date.now() - saved.savedAt < EPG_REFRESH_MS
+        && Array.isArray(saved.channels) && Array.isArray(saved.programs)) {
+        epgCacheKey = key;
+        epgChannels = saved.channels as EpgChannel[];
+        epgPrograms = (saved.programs as EpgProgram[]).filter((program) => program && Number.isFinite(program.start)
+          && Number.isFinite(program.end) && program.end > Date.now() - EPG_RETENTION_MS && program.start < Date.now() + EPG_RETENTION_MS);
+        indexEpgPrograms();
+        renderEpgMappingResults();
+        if (!epgGuide.classList.contains('hidden')) renderEpgGuide();
+        if (currentPage === 'live') renderChannels();
+        epgSettingsStatus.textContent = `Using saved guide data · updated ${new Date(saved.savedAt).toLocaleString()}.`;
+        scheduleEpgRefresh();
+        return;
+      }
+    } catch { /* The guide can still be fetched if TV storage is unavailable. */ }
+  }
+  if (!force && epgCacheKey === key && epgPrograms.length) {
+    if (!epgGuide.classList.contains('hidden')) await loadProviderEpgForCurrentPage();
+    return;
+  }
+
+  epgFetchController?.abort();
+  if (force) epgProviderFetchedChannels = new Set();
+  const controller = new AbortController();
+  epgFetchController = controller;
+  const timeout = window.setTimeout(() => controller.abort(), 180_000);
+  epgGuideStatus.textContent = 'Downloading TV guide…';
+  epgSettingsStatus.textContent = 'Downloading TV guide…';
+  try {
+    const customUrl = xmltvUrlInput.value.trim();
+    let guide: { channels: EpgChannel[]; programs: EpgProgram[] } | null = null;
+    let xmltvError = '';
+    if (customUrl || sourceType === 'xtream') {
+      try {
+        const sourceUrl = customUrl ? new URL(customUrl).toString() : providerXmltvUrl();
+        guide = await fetchXmltv(sourceUrl, controller.signal);
+      } catch (error) {
+        xmltvError = error instanceof Error ? error.message : 'XMLTV could not be loaded.';
+      }
+    }
+    if (controller.signal.aborted) throw new Error('Guide refresh was cancelled or timed out.');
+    if (guide?.programs.length) {
+      epgChannels = guide.channels;
+      epgPrograms = guide.programs;
+      indexEpgPrograms();
+      epgCacheKey = key;
+      epgSettingsStatus.textContent = `${epgPrograms.length.toLocaleString()} guide programs loaded.`;
+    } else if (sourceType === 'xtream') {
+      epgChannels = [];
+      epgPrograms = [];
+      indexEpgPrograms();
+      const added = await fetchProviderEpgForChannels(guideChannels().slice(0, EPG_CHANNEL_FALLBACK_LIMIT), controller.signal);
+      epgCacheKey = key;
+      if (added) epgSettingsStatus.textContent = `${added.toLocaleString()} provider guide programs loaded for live channels.`;
+      else throw new Error(xmltvError || 'The provider returned no guide data. You can enter an XMLTV URL in Settings.');
+    } else {
+      throw new Error(xmltvError || 'Enter an XMLTV URL for this playlist source.');
+    }
+    renderEpgMappingResults();
+    if (!epgGuide.classList.contains('hidden')) renderEpgGuide();
+    if (currentPage === 'live') renderChannels();
+    try {
+      await writeEpgSnapshot({ key, sourceHash: epgSourceHashForCurrentProvider(), savedAt: Date.now(), channels: epgChannels, programs: epgPrograms });
+    } catch { /* Guide playback remains usable without IndexedDB. */ }
+    epgGuideStatus.textContent = `${epgPrograms.length.toLocaleString()} programs · cached for 12 hours.`;
+    scheduleEpgRefresh();
+  } catch (error) {
+    const text = error instanceof Error ? error.message : 'Could not refresh the TV guide.';
+    epgSettingsStatus.textContent = text;
+    epgGuideStatus.textContent = epgPrograms.length ? `Showing saved guide data. ${text}` : text;
+  } finally {
+    window.clearTimeout(timeout);
+    if (epgFetchController === controller) epgFetchController = null;
+  }
+}
+
+async function loadProviderEpgForCurrentPage(): Promise<void> {
+  if (sourceType !== 'xtream') return;
+  epgFetchController?.abort();
+  const controller = new AbortController();
+  epgFetchController = controller;
+  const start = (epgPage - 1) * EPG_CHANNELS_PER_PAGE;
+  const pageChannels = guideChannels().slice(start, start + EPG_CHANNELS_PER_PAGE);
+  try {
+    const added = await fetchProviderEpgForChannels(pageChannels, controller.signal);
+    if (added) {
+      renderEpgGuide();
+      try { await writeEpgSnapshot({ key: epgCacheKey, sourceHash: epgSourceHashForCurrentProvider(), savedAt: Date.now(), channels: epgChannels, programs: epgPrograms }); }
+      catch { /* The on-screen guide is still usable without a cache. */ }
+      if (currentPage === 'live') renderChannels();
+    }
+  } finally {
+    if (epgFetchController === controller) epgFetchController = null;
+  }
+}
+
 function providerPlaybackServer(auth: XtreamAuth, enteredBase: string): string {
   const server = auth.server_info;
   if (!server?.url) return enteredBase;
@@ -418,6 +716,156 @@ function clearChildren(element: Element): void {
   }
 }
 
+function syncDropdown(control: DropdownControl): void {
+  const selected = Array.from(control.select.options).find((option) => option.value === control.select.value);
+  control.trigger.textContent = selected?.textContent ?? '';
+  control.trigger.setAttribute('aria-label', `${control.select.closest('label')?.firstChild?.textContent?.trim() ?? 'Choose'}: ${control.trigger.textContent}`);
+}
+
+function syncAllDropdowns(): void {
+  dropdownControls.forEach(syncDropdown);
+}
+
+function closeDropdownSelection(commit: boolean): void {
+  if (!activeDropdown) return;
+  const control = activeDropdown;
+  if (!commit) control.select.value = control.originalValue;
+  activeDropdown = null;
+  control.list.classList.add('hidden');
+  control.trigger.setAttribute('aria-expanded', 'false');
+  syncDropdown(control);
+  control.trigger.focus();
+}
+
+function commitDropdownValue(control: DropdownControl, value: string): void {
+  control.select.value = value;
+  closeDropdownSelection(true);
+  control.select.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function openDropdownSelection(control: DropdownControl): void {
+  if (activeDropdown) closeDropdownSelection(false);
+  control.originalValue = control.select.value;
+  focusedDropdownOption = Math.max(0, Array.from(control.select.options).findIndex((option) => option.value === control.select.value));
+  clearChildren(control.list);
+  Array.from(control.select.options).forEach((option, index) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `dropdown-option${index === focusedDropdownOption ? ' selected' : ''}`;
+    button.setAttribute('role', 'option');
+    button.setAttribute('aria-selected', String(option.value === control.select.value));
+    button.dataset.value = option.value;
+    button.textContent = option.textContent ?? option.value;
+    button.addEventListener('click', () => commitDropdownValue(control, option.value));
+    control.list.appendChild(button);
+  });
+  activeDropdown = control;
+  control.trigger.setAttribute('aria-expanded', 'true');
+  control.list.classList.remove('hidden');
+  control.list.querySelectorAll<HTMLButtonElement>('.dropdown-option')[focusedDropdownOption]?.focus();
+}
+
+function moveDropdownHighlight(direction: -1 | 1): void {
+  if (!activeDropdown) return;
+  const options = activeDropdown.list.querySelectorAll<HTMLButtonElement>('.dropdown-option');
+  if (!options.length) return;
+  focusedDropdownOption = Math.max(0, Math.min(options.length - 1, focusedDropdownOption + direction));
+  options.forEach((option, index) => option.classList.toggle('selected', index === focusedDropdownOption));
+  options[focusedDropdownOption].focus();
+}
+
+function setupDropdowns(): void {
+  document.querySelectorAll<HTMLSelectElement>('select').forEach((select) => {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'dropdown-control';
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'dropdown-trigger';
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', 'false');
+    const list = document.createElement('div');
+    list.className = 'dropdown-options hidden';
+    list.setAttribute('role', 'listbox');
+    const control: DropdownControl = { select, wrapper, trigger, list, originalValue: select.value };
+    dropdownControls.set(select, control);
+    wrapper.appendChild(trigger);
+    wrapper.appendChild(list);
+    select.parentElement?.insertBefore(wrapper, select);
+    select.hidden = true;
+    select.tabIndex = -1;
+    select.setAttribute('aria-hidden', 'true');
+    trigger.addEventListener('click', () => {
+      if (activeDropdown === control) closeDropdownSelection(false);
+      else openDropdownSelection(control);
+    });
+    syncDropdown(control);
+  });
+}
+
+function focusDropdownTrigger(select: HTMLSelectElement): void {
+  dropdownControls.get(select)?.trigger.focus();
+}
+
+function updateInputProxy(input: HTMLInputElement): void {
+  const proxy = inputProxies.get(input);
+  if (!proxy) return;
+  proxy.textContent = input.value || input.placeholder || '';
+  proxy.classList.toggle('placeholder', !input.value && !!input.placeholder);
+}
+
+function focusInputProxy(input: HTMLInputElement): void {
+  inputProxies.get(input)?.focus();
+}
+
+function beginInputEditing(input: HTMLInputElement): void {
+  if (editingInput) endInputEditing();
+  const proxy = inputProxies.get(input);
+  if (!proxy) return;
+  editingInput = input;
+  input.hidden = false;
+  input.readOnly = false;
+  input.tabIndex = 0;
+  proxy.hidden = true;
+  input.focus();
+}
+
+function endInputEditing(): void {
+  if (!editingInput) return;
+  const input = editingInput;
+  const proxy = inputProxies.get(input);
+  updateInputProxy(input);
+  editingInput = null;
+  input.blur();
+  input.readOnly = true;
+  input.tabIndex = -1;
+  input.hidden = true;
+  if (proxy) {
+    proxy.hidden = false;
+    proxy.focus();
+  }
+}
+
+function setupInputProxies(): void {
+  document.querySelectorAll<HTMLInputElement>('input[type="text"], input[type="url"], input[type="search"], input[type="password"]')
+    .forEach((input) => {
+      const proxy = document.createElement('button');
+      proxy.type = 'button';
+      proxy.className = 'input-proxy';
+      const labelText = input.closest('label')?.textContent?.replace(input.value, '').trim();
+      proxy.setAttribute('aria-label', labelText || input.placeholder || 'Text field');
+      input.parentElement?.insertBefore(proxy, input);
+      input.hidden = true;
+      input.readOnly = true;
+      input.tabIndex = -1;
+      input.required = false;
+      inputProxies.set(input, proxy);
+      updateInputProxy(input);
+      input.addEventListener('input', () => updateInputProxy(input));
+      input.addEventListener('change', () => updateInputProxy(input));
+      proxy.addEventListener('click', () => beginInputEditing(input));
+    });
+}
+
 function categoriesFor(view: CatalogView): Category[] {
   if (view === 'movies') return movieCategories;
   if (view === 'series') return seriesCategories;
@@ -451,39 +899,33 @@ function selectedLanguageView(): CatalogView {
 function renderLanguageFilter(): void {
   const visible = currentPage === 'settings' || currentPage === 'movies' || currentPage === 'series' || currentPage === 'live';
   languageFilter.classList.toggle('hidden', !visible);
-  clearChildren(languageFilter);
   if (!visible) return;
-
   const view = selectedLanguageView();
   const available = languagesForView(view);
   if (activeLanguageFilters[view] !== 'all' && available.indexOf(activeLanguageFilters[view]) < 0) {
     activeLanguageFilters[view] = 'all';
   }
-  const options = [{ value: 'all', label: 'All' }, ...available.map((label) => ({ value: label.toUpperCase(), label }))];
-  for (const option of options) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `language-choice${activeLanguageFilters[view] === option.value ? ' selected' : ''}`;
-    button.setAttribute('aria-pressed', String(activeLanguageFilters[view] === option.value));
-    button.setAttribute('aria-label', option.value === 'all' ? 'All languages' : option.label);
-    button.title = option.label;
-    button.textContent = option.label;
-    button.addEventListener('click', () => {
-      activeLanguageFilters[view] = option.value;
-      try { localStorage.setItem(languageFilterKey, JSON.stringify(activeLanguageFilters)); } catch { /* Session-only filter selection. */ }
-      renderLanguageFilter();
-      if (currentPage === 'settings') {
-        renderCategorySettings();
-      } else {
-        updateCatalogHeading();
-        renderChannels();
-      }
-      Array.from(languageFilter.querySelectorAll<HTMLButtonElement>('.language-choice'))
-        .find((candidate) => candidate.dataset.language === option.value)?.focus();
-    });
-    button.dataset.language = option.value;
-    languageFilter.appendChild(button);
+  clearChildren(languageSelect);
+  languageSelect.appendChild(new Option('All languages', 'all'));
+  for (const label of available) languageSelect.appendChild(new Option(label, label.toUpperCase()));
+  languageSelect.value = activeLanguageFilters[view];
+  const control = dropdownControls.get(languageSelect);
+  if (control) syncDropdown(control);
+}
+
+function applyLanguageFilter(): void {
+  const view = selectedLanguageView();
+  activeLanguageFilters[view] = languageSelect.value;
+  try { localStorage.setItem(languageFilterKey, JSON.stringify(activeLanguageFilters)); } catch { /* Session-only filter selection. */ }
+  if (view === 'movies' || view === 'series') catalogPages[view] = 1;
+  if (currentPage === 'settings') {
+    renderCategorySettings();
+  } else {
+    categorySelect.value = 'all';
+    updateCatalogHeading();
+    renderChannels();
   }
+  focusDropdownTrigger(languageSelect);
 }
 
 function isCategoryEnabled(view: CatalogView, categoryId: string | number | undefined): boolean {
@@ -531,6 +973,84 @@ function loadHiddenCategories(key: string): void {
   }
 }
 
+function epgSettingsStorageKey(): string { return `${EPG_SETTINGS_KEY}.${watchScope}`; }
+function epgMappingsStorageKey(): string { return `${EPG_MAPPINGS_KEY}.${watchScope}`; }
+
+function loadEpgSettings(): void {
+  try {
+    xmltvUrlInput.value = localStorage.getItem(epgSettingsStorageKey()) ?? '';
+    manualEpgMappings = JSON.parse(localStorage.getItem(epgMappingsStorageKey()) ?? '{}') as Record<string, string>;
+    if (!manualEpgMappings || typeof manualEpgMappings !== 'object' || Array.isArray(manualEpgMappings)) manualEpgMappings = {};
+  } catch {
+    xmltvUrlInput.value = '';
+    manualEpgMappings = {};
+  }
+  updateInputProxy(xmltvUrlInput);
+  renderEpgMappingResults();
+}
+
+function saveEpgMappings(): boolean {
+  try {
+    localStorage.setItem(epgMappingsStorageKey(), JSON.stringify(manualEpgMappings));
+    return true;
+  } catch {
+    epgMappingStatus.textContent = 'TV storage could not save this channel mapping.';
+    return false;
+  }
+}
+
+function renderEpgMappingResults(): void {
+  const channelQuery = epgMapChannelSearch.value.trim().toLowerCase();
+  const sourceQuery = epgMapSourceSearch.value.trim().toLowerCase();
+  const addResults = (container: HTMLElement, entries: Array<{ id: string; name: string; selected: boolean }>, choose: (id: string) => void): void => {
+    clearChildren(container);
+    for (const entry of entries.slice(0, 10)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `epg-map-result${entry.selected ? ' selected' : ''}`;
+      button.setAttribute('aria-pressed', String(entry.selected));
+      button.textContent = entry.name;
+      button.addEventListener('click', () => choose(entry.id));
+      container.appendChild(button);
+    }
+    if (!entries.length) {
+      const note = document.createElement('span');
+      note.className = 'muted';
+      note.textContent = 'No matches. Enter a search term or load guide data.';
+      container.appendChild(note);
+    }
+  };
+  const channelEntries = channels
+    .filter((channel) => !channelQuery || String(channel.name ?? '').toLowerCase().includes(channelQuery))
+    .map((channel) => ({ id: String(channel.stream_id), name: channel.name ?? `Channel ${channel.stream_id}`, selected: String(selectedEpgMapChannel?.stream_id ?? '') === String(channel.stream_id) }));
+  addResults(epgMapChannelResults, channelEntries, (id) => {
+    selectedEpgMapChannel = channels.find((channel) => String(channel.stream_id) === id) ?? null;
+    if (selectedEpgMapChannel) {
+      const mappedId = manualEpgMappings[id];
+      const mappedName = epgChannels.find((channel) => channel.id === mappedId)?.name;
+      epgMappingStatus.textContent = mappedName ? `Mapped to ${mappedName}. Choose another guide channel to replace it.` : 'Now choose a matching XMLTV channel.';
+    }
+    epgClearMappingButton.disabled = !selectedEpgMapChannel || !manualEpgMappings[id];
+    renderEpgMappingResults();
+  });
+  const sourceEntries = epgChannels
+    .filter((source) => !sourceQuery || source.name.toLowerCase().includes(sourceQuery) || source.id.toLowerCase().includes(sourceQuery))
+    .map((source) => ({ id: source.id, name: `${source.name} · ${source.id}`, selected: !!selectedEpgMapChannel && manualEpgMappings[String(selectedEpgMapChannel.stream_id)] === source.id }));
+  addResults(epgMapSourceResults, sourceEntries, (id) => {
+    if (!selectedEpgMapChannel) {
+      epgMappingStatus.textContent = 'Choose a live channel first.';
+      return;
+    }
+    manualEpgMappings[String(selectedEpgMapChannel.stream_id)] = id;
+    const saved = saveEpgMappings();
+    const name = epgChannels.find((source) => source.id === id)?.name ?? id;
+    if (saved) epgMappingStatus.textContent = `${selectedEpgMapChannel.name ?? 'Channel'} is mapped to ${name}.`;
+    epgClearMappingButton.disabled = false;
+    renderEpgMappingResults();
+    if (!epgGuide.classList.contains('hidden')) renderEpgGuide();
+  });
+}
+
 function loadWatchHistory(): void {
   try {
     const saved = JSON.parse(localStorage.getItem(WATCH_HISTORY_KEY) ?? '[]') as unknown;
@@ -572,6 +1092,7 @@ function updatePlaybackControls(): void {
   nextChannelButton.classList.toggle('hidden', !live);
   seekBackButton.classList.toggle('hidden', live);
   seekForwardButton.classList.toggle('hidden', live);
+  playerGuideButton.classList.toggle('hidden', !live);
   updateTrackButtonVisibility();
 }
 
@@ -741,14 +1262,33 @@ function startEpisodeCountdown(): void {
 }
 
 function saveTrackPreferences(): void {
-  preferredAudioLanguages = audioLanguagePreferencesInput.value.split(',').map((item) => item.trim()).filter(Boolean);
-  preferredSubtitleLanguages = subtitleLanguagePreferencesInput.value.split(',').map((item) => item.trim()).filter(Boolean);
+  preferredAudioLanguages = audioLanguagePreferencesInput.value ? [audioLanguagePreferencesInput.value] : [];
+  preferredSubtitleLanguages = subtitleLanguagePreferencesInput.value ? [subtitleLanguagePreferencesInput.value] : [];
   try {
     localStorage.setItem(TRACK_PREFERENCES_KEY, JSON.stringify({ audio: preferredAudioLanguages, subtitles: preferredSubtitleLanguages }));
   } catch { /* Track preferences remain active for this session. */ }
   manualAudioTrackIndex = null;
   manualSubtitleTrackIndex = null;
   applyPreferredTracks();
+}
+
+function populateLanguagePreferences(): void {
+  const languages: Array<[string, string]> = [
+    ['en', 'English'], ['nl', 'Dutch'], ['de', 'German'], ['pl', 'Polish'], ['fr', 'French'], ['es', 'Spanish'],
+    ['it', 'Italian'], ['pt', 'Portuguese'], ['sv', 'Swedish'], ['no', 'Norwegian'], ['da', 'Danish'],
+    ['fi', 'Finnish'], ['ar', 'Arabic'], ['tr', 'Turkish'], ['ru', 'Russian'], ['uk', 'Ukrainian'],
+    ['el', 'Greek'], ['he', 'Hebrew'], ['hi', 'Hindi'], ['cs', 'Czech'], ['ro', 'Romanian'],
+    ['hu', 'Hungarian'], ['ja', 'Japanese'], ['ko', 'Korean'], ['zh', 'Chinese']
+  ];
+  clearChildren(audioLanguagePreferencesInput);
+  clearChildren(subtitleLanguagePreferencesInput);
+  audioLanguagePreferencesInput.appendChild(new Option('Provider default', ''));
+  subtitleLanguagePreferencesInput.appendChild(new Option('Off / no preference', ''));
+  for (const [code, label] of languages) {
+    const option = `${label} (${code})`;
+    audioLanguagePreferencesInput.appendChild(new Option(option, code));
+    subtitleLanguagePreferencesInput.appendChild(new Option(option, code));
+  }
 }
 
 function watchEntryForMovie(id: number | string): WatchProgress | undefined {
@@ -1000,6 +1540,7 @@ function renderCategorySettings(): void {
     checkbox.addEventListener('change', () => {
       if (checkbox.checked) hiddenCategoryIds[view].delete(String(category.category_id));
       else hiddenCategoryIds[view].add(String(category.category_id));
+      if (view === 'movies' || view === 'series') catalogPages[view] = 1;
       saveHiddenCategories();
       updateCatalogHeading();
       renderChannels();
@@ -1039,10 +1580,12 @@ function showPage(page: AppPage): void {
   }
   if (page === 'home') renderHome();
   if (page === 'settings') renderCategorySettings();
+  if (page === 'settings') renderEpgMappingResults();
   if (page === 'my-list') renderMyList();
   const selectedNavPage = page === 'detail' ? previousPage : page;
   document.querySelectorAll<HTMLButtonElement>('.nav-button').forEach((button) => button.classList.toggle('active', button.dataset.page === selectedNavPage));
-  if (page === 'search') window.setTimeout(() => searchInput.focus(), 0);
+  syncAllDropdowns();
+  if (page === 'search') window.setTimeout(() => focusInputProxy(searchInput), 0);
   if (leavingDetail && detailReturnFocus?.isConnected) {
     detailReturnFocus.focus();
     detailReturnFocus = null;
@@ -1056,12 +1599,15 @@ function updateCatalogHeading(): void {
     : currentPage === 'search' ? 'Search'
       : catalogView === 'movies' ? 'Movies' : catalogView === 'series' ? 'Series' : 'Live TV';
   backToSeriesButton.classList.toggle('hidden', !activeSeries);
+  openGuideButton.classList.toggle('hidden', currentPage !== 'live' || catalogView !== 'live' || activeSeries !== null || !channels.length);
   clearChildren(categorySelect);
   categorySelect.appendChild(new Option('All categories', 'all'));
   for (const category of categoriesForView()) {
     if (category.category_id === undefined || !category.category_name || !isCategoryVisible(catalogView, category.category_id)) continue;
     categorySelect.appendChild(new Option(category.category_name, String(category.category_id)));
   }
+  const categoryControl = dropdownControls.get(categorySelect);
+  if (categoryControl) syncDropdown(categoryControl);
 }
 
 function showCatalog(cachedAt?: number): void {
@@ -1175,6 +1721,15 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     cacheKey = sourceType === 'm3u' ? m3uCatalogKey(base) : catalogKey(base, username);
     watchScope = m3uCatalogKey(cacheKey);
     loadHiddenCategories(cacheKey);
+    epgFetchController?.abort();
+    window.clearTimeout(epgRefreshTimer);
+    epgCacheKey = '';
+    epgChannels = [];
+    epgPrograms = [];
+    epgProviderFetchedChannels = new Set();
+    selectedEpgMapChannel = null;
+    indexEpgPrograms();
+    loadEpgSettings();
 
     try {
       cache = await readCatalog(cacheKey);
@@ -1184,6 +1739,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     if (cache && Array.isArray(cache.channels) && cache.channels.length) {
       categories = Array.isArray(cache.categories) ? cache.categories : [];
       channels = cache.channels;
+      renderEpgMappingResults();
       movieCategories = Array.isArray(cache.movieCategories) ? cache.movieCategories : [];
       movies = Array.isArray(cache.movies) ? cache.movies : [];
       seriesCategories = Array.isArray(cache.seriesCategories) ? cache.seriesCategories : [];
@@ -1223,6 +1779,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       if (!parsed.channels.length) throw new Error('The M3U file contains no valid channel entries.');
       categories = parsed.categories;
       channels = parsed.channels;
+      renderEpgMappingResults();
       movieCategories = [];
       movies = [];
       seriesCategories = [];
@@ -1256,6 +1813,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     const channelResponse = await api<Channel[]>('get_live_streams', {}, 180_000);
     if (!Array.isArray(channelResponse)) throw new Error('Provider returned an invalid live channel list.');
     channels = channelResponse.filter((channel) => channel && channel.stream_id !== undefined && channel.name);
+    renderEpgMappingResults();
     if (!channels.length) throw new Error('The provider account has no live channels.');
 
     await saveCatalogSnapshot(cacheKey);
@@ -1292,10 +1850,10 @@ function renderChannels(append = false): void {
       && isCategoryVisible('live', channel.category_id)
       && (!query || String(channel.name ?? '').toLowerCase().includes(query)))
     : [];
-  const items: Array<{ title: string; poster?: string; meta?: string; channel?: Channel; onSelect: () => void }> = [];
+  const items: Array<{ title: string; poster?: string; meta?: string; secondary?: string; channel?: Channel; onSelect: () => void }> = [];
   if (catalogView === 'live' && !activeSeries) {
     for (const channel of visibleChannels) {
-      items.push({ title: channel.name ?? 'Unknown channel', meta: String(channel.num ?? 'Live TV'), channel, onSelect: () => playChannel(channel) });
+      items.push({ title: channel.name ?? 'Unknown channel', meta: String(channel.num ?? 'Live TV'), secondary: liveProgramSummary(channel), channel, onSelect: () => playChannel(channel) });
     }
   } else if (activeSeries) {
     for (const episode of seriesEpisodes) {
@@ -1328,7 +1886,23 @@ function renderChannels(append = false): void {
     renderedCount = 0;
     clearChildren(channelList);
   }
-  const next = items.slice(renderedCount, renderedCount + PAGE_SIZE);
+  const pagedCatalog = !activeSeries && (catalogView === 'movies' || catalogView === 'series');
+  let next: typeof items;
+  if (pagedCatalog) {
+    const view = catalogView as 'movies' | 'series';
+    catalogTotalPages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
+    catalogPages[view] = Math.max(1, Math.min(catalogPages[view], catalogTotalPages));
+    const page = catalogPages[view];
+    next = items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    pagination.classList.toggle('hidden', items.length === 0);
+    previousPageButton.disabled = page <= 1;
+    nextPageButton.disabled = page >= catalogTotalPages;
+    pageIndicator.textContent = `Page ${page} of ${catalogTotalPages}`;
+    moreButton.classList.add('hidden');
+  } else {
+    next = items.slice(renderedCount, renderedCount + LIVE_BATCH_SIZE);
+    pagination.classList.add('hidden');
+  }
   const fragment = document.createDocumentFragment();
   for (const item of next) {
     const button = document.createElement('button');
@@ -1344,8 +1918,17 @@ function renderChannels(append = false): void {
       const name = document.createElement('span');
       name.className = 'channel-name';
       name.textContent = item.title;
+      const labelGroup = document.createElement('span');
+      labelGroup.className = 'channel-label-group';
+      labelGroup.appendChild(name);
+      if (item.secondary) {
+        const epgSummary = document.createElement('span');
+        epgSummary.className = 'channel-epg-summary';
+        epgSummary.textContent = item.secondary;
+        labelGroup.appendChild(epgSummary);
+      }
       button.appendChild(number);
-      button.appendChild(name);
+      button.appendChild(labelGroup);
     } else {
       button.className = 'media-card';
       if (item.poster) {
@@ -1374,13 +1957,210 @@ function renderChannels(append = false): void {
   }
   channelList.appendChild(fragment);
   renderedCount += next.length;
-  moreButton.classList.toggle('hidden', renderedCount >= items.length);
+  if (!pagedCatalog) moreButton.classList.toggle('hidden', renderedCount >= items.length);
   if (!items.length) {
     const empty = document.createElement('p');
     empty.className = 'muted';
     empty.textContent = catalogView === 'live' ? 'No channels match this search or category.' : 'No titles match this search or category.';
     channelList.appendChild(empty);
   }
+}
+
+function guideChannels(): Channel[] {
+  const result = visibleChannels.slice();
+  if (selectedChannel && !result.some((channel) => String(channel.stream_id) === String(selectedChannel?.stream_id))) result.unshift(selectedChannel);
+  return result;
+}
+
+function formatGuideTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function guideArchiveDays(channel: Channel): number {
+  const enabled = channel.tv_archive === true || String(channel.tv_archive).toLowerCase() === '1' || String(channel.tv_archive).toLowerCase() === 'true';
+  const days = Number(channel.tv_archive_duration);
+  return enabled && Number.isFinite(days) && days > 0 ? days : 0;
+}
+
+function canReplayProgram(channel: Channel, program: EpgProgram | undefined): boolean {
+  if (sourceType !== 'xtream' || channel.stream_url || !program || program.start >= Date.now()) return false;
+  const days = guideArchiveDays(channel);
+  return days > 0 && Date.now() - program.start <= days * 24 * 60 * 60 * 1000;
+}
+
+function showEpgProgramDetails(channel: Channel, program?: EpgProgram): void {
+  selectedEpgProgram = { channel, program };
+  epgDetailTitle.textContent = program?.title ?? channel.name ?? 'Live channel';
+  epgDetailTime.textContent = program
+    ? `${formatGuideTime(program.start)} – ${formatGuideTime(program.end)} · ${channel.name ?? 'Live TV'}`
+    : channel.name ?? 'Live channel';
+  epgDetailDescription.textContent = program?.description ?? program?.subtitle ?? 'No program description is available.';
+  epgWatchLiveButton.disabled = !channel.stream_id && !channel.stream_url;
+  const replayable = canReplayProgram(channel, program);
+  epgReplayButton.classList.toggle('hidden', !replayable);
+  epgReplayButton.textContent = program && program.end > Date.now() ? 'Start Over' : 'Replay';
+  epgProgramDetail.classList.remove('hidden');
+  epgWatchLiveButton.focus();
+}
+
+function updateEpgNowLines(): void {
+  const now = Date.now();
+  epgGrid.querySelectorAll<HTMLElement>('.epg-program-track').forEach((track) => {
+    const start = Number(track.dataset.rangeStart);
+    const line = track.querySelector<HTMLElement>('.epg-now-line');
+    if (!line) return;
+    if (now < start || now > start + EPG_GRID_HOURS * 60 * 60 * 1000) {
+      line.classList.add('hidden');
+      return;
+    }
+    line.classList.remove('hidden');
+    line.style.left = `${((now - start) / (EPG_GRID_HOURS * 60 * 60 * 1000)) * 100}%`;
+  });
+}
+
+function renderEpgGuide(): void {
+  const listedChannels = guideChannels();
+  const pageCount = Math.max(1, Math.ceil(listedChannels.length / EPG_CHANNELS_PER_PAGE));
+  epgPage = Math.max(1, Math.min(epgPage, pageCount));
+  const pageChannels = listedChannels.slice((epgPage - 1) * EPG_CHANNELS_PER_PAGE, epgPage * EPG_CHANNELS_PER_PAGE);
+  const now = Date.now();
+  const rangeStartDate = new Date(now);
+  rangeStartDate.setMinutes(0, 0, 0);
+  const rangeStart = rangeStartDate.getTime();
+  const rangeEnd = rangeStart + EPG_GRID_HOURS * 60 * 60 * 1000;
+  const totalDuration = rangeEnd - rangeStart;
+  epgGrid.style.setProperty('--timeline-width', `${EPG_GRID_HOURS * EPG_HOUR_WIDTH}px`);
+  epgGrid.style.setProperty('--epg-hour-width', `${EPG_HOUR_WIDTH}px`);
+  clearChildren(epgGrid);
+
+  const header = document.createElement('div');
+  header.className = 'epg-time-header';
+  const channelHeading = document.createElement('div');
+  channelHeading.className = 'epg-channel-cell';
+  channelHeading.textContent = 'Channels';
+  header.appendChild(channelHeading);
+  const hours = document.createElement('div');
+  hours.className = 'epg-hours';
+  for (let hour = 0; hour < EPG_GRID_HOURS; hour += 1) {
+    const label = document.createElement('span');
+    label.textContent = formatGuideTime(rangeStart + hour * 60 * 60 * 1000);
+    hours.appendChild(label);
+  }
+  header.appendChild(hours);
+  epgGrid.appendChild(header);
+
+  for (const channel of pageChannels) {
+    const row = document.createElement('div');
+    row.className = 'epg-grid-row';
+    const channelButton = document.createElement('button');
+    channelButton.type = 'button';
+    channelButton.className = 'epg-channel-cell';
+    channelButton.textContent = `${channel.num ? `${channel.num}. ` : ''}${channel.name ?? 'Live channel'}`;
+    channelButton.setAttribute('aria-label', `Program information for ${channel.name ?? 'live channel'}`);
+    channelButton.addEventListener('click', () => showEpgProgramDetails(channel, currentProgramForChannel(channel)));
+    row.appendChild(channelButton);
+
+    const track = document.createElement('div');
+    track.className = 'epg-program-track';
+    track.dataset.rangeStart = String(rangeStart);
+    const nowLine = document.createElement('div');
+    nowLine.className = 'epg-now-line';
+    track.appendChild(nowLine);
+    const items = programsForChannel(channel).filter((program) => program.end > rangeStart && program.start < rangeEnd);
+    for (const program of items) {
+      const start = Math.max(rangeStart, program.start);
+      const end = Math.min(rangeEnd, program.end);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `epg-program${program.start <= now && program.end > now ? ' current' : ''}`;
+      button.style.left = `${((start - rangeStart) / totalDuration) * 100}%`;
+      button.style.width = `${Math.max(0.7, ((end - start) / totalDuration) * 100)}%`;
+      button.title = `${program.title} · ${formatGuideTime(program.start)}–${formatGuideTime(program.end)}`;
+      button.setAttribute('aria-label', `${program.title}, ${formatGuideTime(program.start)} to ${formatGuideTime(program.end)}`);
+      const title = document.createElement('span');
+      title.textContent = program.title;
+      const time = document.createElement('small');
+      time.textContent = `${formatGuideTime(program.start)} – ${formatGuideTime(program.end)}`;
+      button.appendChild(title);
+      button.appendChild(time);
+      button.addEventListener('click', () => showEpgProgramDetails(channel, program));
+      track.appendChild(button);
+    }
+    if (!items.length) {
+      const noListings = document.createElement('span');
+      noListings.className = 'epg-no-program';
+      noListings.textContent = 'No guide listings';
+      track.appendChild(noListings);
+    }
+    row.appendChild(track);
+    epgGrid.appendChild(row);
+  }
+  epgPagePrevious.disabled = epgPage <= 1;
+  epgPageNext.disabled = epgPage >= pageCount;
+  epgPageIndicator.textContent = listedChannels.length ? `Channel page ${epgPage} of ${pageCount}` : 'No channels';
+  epgPreviewTitle.textContent = selectedChannel?.name ?? 'No channel selected';
+  if (!pageChannels.length) {
+    epgGuideStatus.textContent = 'No channels match the current Live TV filters.';
+  } else if (epgPrograms.length) {
+    epgGuideStatus.textContent = `${epgPrograms.length.toLocaleString()} cached programs · now to 24 hours ahead`;
+  }
+  updateEpgNowLines();
+}
+
+async function openEpgGuide(): Promise<void> {
+  const listedChannels = guideChannels();
+  const channelToPreview = selectedChannel ?? listedChannels[0];
+  if (!selectedChannel && channelToPreview) await playChannel(channelToPreview);
+  if (!channels.length) {
+    libraryMessage.textContent = 'Load live channels before opening the TV Guide.';
+    libraryMessage.classList.remove('hidden', 'loading');
+    return;
+  }
+  playerLayer.classList.add('guide-mode');
+  playerLayer.classList.remove('hidden');
+  epgProgramDetail.classList.add('hidden');
+  epgGuide.classList.remove('hidden');
+  epgPage = 1;
+  renderEpgGuide();
+  window.clearInterval(epgClockTimer);
+  epgClockTimer = window.setInterval(updateEpgNowLines, 60_000);
+  (epgGrid.querySelector<HTMLButtonElement>('button.epg-channel-cell, .epg-program') ?? $('close-guide')).focus();
+  if (!epgPrograms.length) epgGuideStatus.textContent = 'Loading cached or provider guide data…';
+  await refreshEpg(false);
+  if (sourceType === 'xtream' && guideChannels().length && !guideChannels().slice((epgPage - 1) * EPG_CHANNELS_PER_PAGE, epgPage * EPG_CHANNELS_PER_PAGE).every((channel) => programsForChannel(channel).length)) {
+    await loadProviderEpgForCurrentPage();
+    renderEpgGuide();
+  }
+}
+
+function closeEpgGuide(): void {
+  epgGuide.classList.add('hidden');
+  window.clearInterval(epgClockTimer);
+  epgClockTimer = 0;
+  epgProgramDetail.classList.add('hidden');
+  playerLayer.classList.remove('guide-mode');
+  playerGuideButton.focus();
+}
+
+async function playEpgProgramLive(): Promise<void> {
+  if (!selectedEpgProgram) return;
+  const { channel } = selectedEpgProgram;
+  closeEpgGuide();
+  await playChannel(channel);
+}
+
+async function replayEpgProgram(): Promise<void> {
+  const selected = selectedEpgProgram;
+  if (!selected?.program || !canReplayProgram(selected.channel, selected.program) || !credentials) return;
+  const end = Math.min(selected.program.end, Date.now());
+  const durationMinutes = Math.ceil((end - selected.program.start) / 60_000);
+  if (durationMinutes < 1) return;
+  const url = providerCatchupUrl(playbackBase ?? credentials.base, credentials.username, credentials.password,
+    selected.channel.stream_id, selected.program.start, durationMinutes, 'ts');
+  const channel = selected.channel;
+  const title = selected.program.title;
+  closeEpgGuide();
+  await startPlayback(title, url, channel);
 }
 
 async function fetchSeriesEpisodes(seriesId: string | number): Promise<SeriesEpisode[]> {
@@ -1600,6 +2380,11 @@ function closePlayer(): void {
   video.pause();
   video.removeAttribute('src');
   video.load();
+  window.clearInterval(epgClockTimer);
+  epgClockTimer = 0;
+  epgGuide.classList.add('hidden');
+  epgProgramDetail.classList.add('hidden');
+  playerLayer.classList.remove('guide-mode');
   playerLayer.classList.add('hidden');
   playerMessage.textContent = '';
   currentVodEntry = null;
@@ -1614,7 +2399,9 @@ function switchChannel(direction: -1 | 1): void {
   if (!selectedChannel || !visibleChannels.length) return;
   const index = visibleChannels.findIndex((channel) => String(channel.stream_id) === String(selectedChannel?.stream_id));
   const nextIndex = (index + direction + visibleChannels.length) % visibleChannels.length;
-  void playChannel(visibleChannels[nextIndex]);
+  void playChannel(visibleChannels[nextIndex]).then(() => {
+    if (!epgGuide.classList.contains('hidden')) renderEpgGuide();
+  });
 }
 
 function resetBackSequence(): void {
@@ -1632,6 +2419,10 @@ function closeExitPrompt(): void {
 
 function handleBackPress(): void {
   if (!playerLayer.classList.contains('hidden')) {
+    if (!epgGuide.classList.contains('hidden')) {
+      closeEpgGuide();
+      return;
+    }
     if (openTrackMenu) {
       closeTrackMenu();
       return;
@@ -1678,25 +2469,103 @@ function exitApplication(): void {
   window.close();
 }
 
-function moveDirectionalFocus(keyCode: number): boolean {
-  const active = document.activeElement as HTMLElement | null;
-  if (!active || active.tagName === 'TEXTAREA' || (active === openDropdown) || active.isContentEditable) return false;
-  const vertical = keyCode === 38 || keyCode === 40;
-  const emptySearch = active === searchInput && !searchInput.value.trim();
-  if (active.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'range'].includes((active as HTMLInputElement).type)
-    && !((active as HTMLInputElement).type === 'search' && (vertical || emptySearch))) return false;
-  const current = active.getBoundingClientRect();
-  const x = current.left + current.width / 2;
-  const y = current.top + current.height / 2;
+function elementIsVisible(element: HTMLElement): boolean {
+  if (('disabled' in element && (element as HTMLButtonElement).disabled) || element.hidden || element.closest('.hidden,[hidden]')) return false;
+  const rect = element.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function visibleContentRows(): HTMLButtonElement[][] {
+  const items = Array.from(channelList.querySelectorAll<HTMLButtonElement>('.media-card, .channel-card'))
+    .filter(elementIsVisible)
+    .sort((left, right) => {
+      const topDifference = left.getBoundingClientRect().top - right.getBoundingClientRect().top;
+      return Math.abs(topDifference) > 18 ? topDifference : left.getBoundingClientRect().left - right.getBoundingClientRect().left;
+    });
+  const rows: HTMLButtonElement[][] = [];
+  for (const item of items) {
+    const top = item.getBoundingClientRect().top;
+    let row = rows.find((candidate) => Math.abs(candidate[0].getBoundingClientRect().top - top) <= 18);
+    if (!row) { row = []; rows.push(row); }
+    row.push(item);
+  }
+  rows.forEach((row) => row.sort((left, right) => left.getBoundingClientRect().left - right.getBoundingClientRect().left));
+  return rows.sort((left, right) => left[0].getBoundingClientRect().top - right[0].getBoundingClientRect().top);
+}
+
+function focusFirstContentItem(): boolean {
+  const first = visibleContentRows()[0]?.[0];
+  if (first) { first.focus(); return true; }
+  if (currentPage === 'settings') {
+    const firstCategory = categoryVisibilityList.querySelector<HTMLElement>('input, button');
+    if (firstCategory && elementIsVisible(firstCategory)) { firstCategory.focus(); return true; }
+    const settingsControl = dropdownControls.get(settingsCategoryType)?.trigger;
+    if (settingsControl && elementIsVisible(settingsControl)) { settingsControl.focus(); return true; }
+  }
+  if (currentPage === 'home') {
+    const homeAction = [heroPlayButton, heroBrowseButton].find(elementIsVisible);
+    if (homeAction) { homeAction.focus(); return true; }
+  }
+  if (currentPage === 'my-list') {
+    const firstSaved = myListView.querySelector<HTMLElement>('.media-card, button');
+    if (firstSaved && elementIsVisible(firstSaved)) { firstSaved.focus(); return true; }
+  }
+  const categoryTrigger = dropdownControls.get(categorySelect)?.trigger;
+  if (categoryTrigger && elementIsVisible(categoryTrigger)) {
+    focusDropdownTrigger(categorySelect);
+    return true;
+  }
+  const languageTrigger = dropdownControls.get(languageSelect)?.trigger;
+  if (languageTrigger && elementIsVisible(languageTrigger)) {
+    languageTrigger.focus();
+    return true;
+  }
+  const active = document.activeElement;
+  return active instanceof HTMLElement ? focusBestGeometricCandidate(active, 39) : false;
+}
+
+function focusSelectedLanguage(): boolean {
+  if (languageFilter.classList.contains('hidden')) return false;
+  focusDropdownTrigger(languageSelect);
+  return true;
+}
+
+function focusTopLeftLibraryAction(): boolean {
+  const actions = Array.from(librarySection.querySelectorAll<HTMLElement>(
+    '.library-heading .dropdown-trigger, .library-heading .input-proxy, .library-heading button'
+  )).filter(elementIsVisible);
+  actions.sort((left, right) => {
+    const leftBounds = left.getBoundingClientRect();
+    const rightBounds = right.getBoundingClientRect();
+    const verticalDifference = leftBounds.top - rightBounds.top;
+    return Math.abs(verticalDifference) > 12 ? verticalDifference : leftBounds.left - rightBounds.left;
+  });
+  const firstAction = actions[0];
+  if (!firstAction) return false;
+  firstAction.focus();
+  return true;
+}
+
+function focusActiveSidebarItem(): boolean {
+  const activeNav = sidebar.querySelector<HTMLButtonElement>('.nav-button.active')
+    ?? sidebar.querySelector<HTMLButtonElement>('.nav-button');
+  if (!activeNav || !elementIsVisible(activeNav)) return false;
+  activeNav.focus();
+  return true;
+}
+
+function focusBestGeometricCandidate(active: HTMLElement, keyCode: number): boolean {
+  const bounds = active.getBoundingClientRect();
+  const x = bounds.left + bounds.width / 2;
+  const y = bounds.top + bounds.height / 2;
+  const scope: ParentNode = !playerLayer.classList.contains('hidden') ? playerLayer
+    : exitConfirm.classList.contains('hidden') ? (appLayout.classList.contains('hidden') ? setupSection : appLayout) : exitConfirm;
+  const candidates = Array.from(scope.querySelectorAll<HTMLElement>('button, input, select'))
+    .filter((candidate) => candidate !== active && elementIsVisible(candidate));
   let best: HTMLElement | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
-  const scope: ParentNode = !playerLayer.classList.contains('hidden') ? playerLayer
-    : exitConfirm.classList.contains('hidden') ? document : exitConfirm;
-  const candidates = scope.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled])');
-  for (const candidate of Array.from(candidates)) {
-    if (candidate === active || candidate === openDropdown || candidate.closest('.hidden')) continue;
+  for (const candidate of candidates) {
     const rect = candidate.getBoundingClientRect();
-    if (!rect.width || !rect.height) continue;
     const dx = rect.left + rect.width / 2 - x;
     const dy = rect.top + rect.height / 2 - y;
     const primary = keyCode === 37 ? -dx : keyCode === 39 ? dx : keyCode === 38 ? -dy : dy;
@@ -1705,20 +2574,80 @@ function moveDirectionalFocus(keyCode: number): boolean {
     const score = primary + secondary * 1.6;
     if (score < bestScore) { best = candidate; bestScore = score; }
   }
-  if (!best && vertical) {
-    const ordered = Array.from(candidates).filter((candidate) => !candidate.closest('.hidden')
-      && candidate.getBoundingClientRect().width > 0 && candidate.getBoundingClientRect().height > 0);
-    const activeIndex = ordered.indexOf(active);
-    const nextIndex = activeIndex + (keyCode === 38 ? -1 : 1);
-    if (activeIndex >= 0 && nextIndex >= 0 && nextIndex < ordered.length) best = ordered[nextIndex];
-  }
   if (!best) return false;
   best.focus();
   return true;
 }
 
+function moveDirectionalFocus(keyCode: number): boolean {
+  const active = document.activeElement as HTMLElement | null;
+  if (!active || editingInput === active || active.isContentEditable || active.tagName === 'TEXTAREA') return false;
+  const rows = visibleContentRows();
+  const rowIndex = rows.findIndex((row) => row.includes(active as HTMLButtonElement));
+  if (rowIndex >= 0) {
+    const row = rows[rowIndex];
+    const itemIndex = row.indexOf(active as HTMLButtonElement);
+    if (keyCode === 37) {
+      if (itemIndex === 0) return focusActiveSidebarItem();
+      row[itemIndex - 1].focus();
+      return true;
+    }
+    if (keyCode === 39) {
+      const next = row[itemIndex + 1];
+      if (next) { next.focus(); return true; }
+      return false;
+    }
+    if (keyCode === 38) {
+      if (rowIndex === 0) return focusSelectedLanguage() || focusTopLeftLibraryAction();
+      const previousRow = rows[rowIndex - 1];
+      if (previousRow) {
+        const x = active.getBoundingClientRect().left + active.getBoundingClientRect().width / 2;
+        const target = previousRow.slice().sort((left, right) =>
+          Math.abs(left.getBoundingClientRect().left + left.getBoundingClientRect().width / 2 - x)
+          - Math.abs(right.getBoundingClientRect().left + right.getBoundingClientRect().width / 2 - x))[0];
+        target?.focus();
+        return !!target;
+      }
+      return focusSelectedLanguage() || focusTopLeftLibraryAction();
+    }
+    if (keyCode === 40) {
+      const nextRow = rows[rowIndex + 1];
+      if (nextRow) {
+        const x = active.getBoundingClientRect().left + active.getBoundingClientRect().width / 2;
+        const target = nextRow.slice().sort((left, right) =>
+          Math.abs(left.getBoundingClientRect().left + left.getBoundingClientRect().width / 2 - x)
+          - Math.abs(right.getBoundingClientRect().left + right.getBoundingClientRect().width / 2 - x))[0];
+        target?.focus();
+        return !!target;
+      }
+      if (!pagination.classList.contains('hidden')) {
+        if (!nextPageButton.disabled) nextPageButton.focus();
+        else if (!previousPageButton.disabled) previousPageButton.focus();
+        else return false;
+        return true;
+      }
+      if (!moreButton.classList.contains('hidden')) { moreButton.focus(); return true; }
+      return false;
+    }
+  }
+
+  const languageTrigger = dropdownControls.get(languageSelect)?.trigger;
+  if (active === languageTrigger && keyCode === 40) {
+    if (!librarySection.classList.contains('hidden')) return focusFirstContentItem();
+    return focusBestGeometricCandidate(active, keyCode);
+  }
+  if (active === languageTrigger && keyCode === 38) return focusBestGeometricCandidate(active, keyCode);
+  if (active.classList.contains('nav-button') && keyCode === 39) return focusFirstContentItem();
+  if (active.classList.contains('sidebar-toggle') && keyCode === 39) return focusFirstContentItem();
+  if (active.classList.contains('dropdown-trigger') && activeDropdown) return false;
+  return focusBestGeometricCandidate(active, keyCode);
+}
+
 function disconnect(): void {
   closePlayer();
+  epgFetchController?.abort();
+  epgFetchController = null;
+  window.clearTimeout(epgRefreshTimer);
   requestController?.abort();
   credentials = null;
   playbackBase = null;
@@ -1734,6 +2663,7 @@ function disconnect(): void {
   catalogView = 'live';
   catalogTypeSelect.value = 'live';
   searchInput.value = '';
+  catalogPages = { movies: 1, series: 1 };
   visibleChannels = [];
   renderedCount = 0;
   clearChildren(categorySelect);
@@ -1753,7 +2683,10 @@ function disconnect(): void {
   }
   updateSourceTypeControls();
   setMessage(saved ? 'Disconnected. Your saved login remains on this TV.' : 'Disconnected. Session credentials were cleared.');
-  serverInput.focus();
+  updateInputProxy(serverInput);
+  updateInputProxy(usernameInput);
+  updateInputProxy(passwordInput);
+  focusInputProxy(serverInput);
 }
 
 form.addEventListener('submit', (event) => {
@@ -1767,14 +2700,22 @@ catalogTypeSelect.addEventListener('change', () => {
   activeSeries = null;
   seriesEpisodes = [];
   searchInput.value = '';
+  updateInputProxy(searchInput);
   updateCatalogHeading();
   renderChannels();
 });
 searchInput.addEventListener('input', () => {
   window.clearTimeout(searchTimer);
-  searchTimer = window.setTimeout(() => renderChannels(), 180);
+  searchTimer = window.setTimeout(() => {
+    if (catalogView === 'movies' || catalogView === 'series') catalogPages[catalogView] = 1;
+    renderChannels();
+  }, 180);
 });
-categorySelect.addEventListener('change', () => renderChannels());
+categorySelect.addEventListener('change', () => {
+  if (catalogView === 'movies' || catalogView === 'series') catalogPages[catalogView] = 1;
+  renderChannels();
+});
+languageSelect.addEventListener('change', applyLanguageFilter);
 backToSeriesButton.addEventListener('click', () => {
   activeSeries = null;
   seriesEpisodes = [];
@@ -1782,6 +2723,68 @@ backToSeriesButton.addEventListener('click', () => {
   renderChannels();
 });
 moreButton.addEventListener('click', () => renderChannels(true));
+previousPageButton.addEventListener('click', () => {
+  if (catalogView !== 'movies' && catalogView !== 'series') return;
+  catalogPages[catalogView] = Math.max(1, catalogPages[catalogView] - 1);
+  renderChannels();
+  focusFirstContentItem();
+});
+nextPageButton.addEventListener('click', () => {
+  if (catalogView !== 'movies' && catalogView !== 'series') return;
+  catalogPages[catalogView] = Math.min(catalogTotalPages, catalogPages[catalogView] + 1);
+  renderChannels();
+  focusFirstContentItem();
+});
+openGuideButton.addEventListener('click', () => { void openEpgGuide(); });
+playerGuideButton.addEventListener('click', () => { void openEpgGuide(); });
+$('close-guide').addEventListener('click', closeEpgGuide);
+epgPagePrevious.addEventListener('click', () => {
+  epgPage = Math.max(1, epgPage - 1);
+  epgProgramDetail.classList.add('hidden');
+  renderEpgGuide();
+  void loadProviderEpgForCurrentPage();
+  epgGrid.querySelector<HTMLButtonElement>('button.epg-channel-cell, .epg-program')?.focus();
+});
+epgPageNext.addEventListener('click', () => {
+  epgPage += 1;
+  epgProgramDetail.classList.add('hidden');
+  renderEpgGuide();
+  void loadProviderEpgForCurrentPage();
+  epgGrid.querySelector<HTMLButtonElement>('button.epg-channel-cell, .epg-program')?.focus();
+});
+epgWatchLiveButton.addEventListener('click', () => { void playEpgProgramLive(); });
+epgReplayButton.addEventListener('click', () => { void replayEpgProgram(); });
+saveEpgSettingsButton.addEventListener('click', () => {
+  const value = xmltvUrlInput.value.trim();
+  try {
+    if (value) {
+      const parsed = new URL(value);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('Use an HTTP or HTTPS XMLTV URL.');
+      localStorage.setItem(epgSettingsStorageKey(), parsed.toString());
+      xmltvUrlInput.value = parsed.toString();
+      updateInputProxy(xmltvUrlInput);
+    } else {
+      localStorage.removeItem(epgSettingsStorageKey());
+    }
+    epgCacheKey = '';
+    epgSettingsStatus.textContent = 'Refreshing the TV guide…';
+    void refreshEpg(true);
+  } catch (error) {
+    epgSettingsStatus.textContent = error instanceof Error ? error.message : 'Could not save the XMLTV URL.';
+  }
+});
+epgMapChannelSearch.addEventListener('input', renderEpgMappingResults);
+epgMapSourceSearch.addEventListener('input', renderEpgMappingResults);
+epgClearMappingButton.addEventListener('click', () => {
+  if (!selectedEpgMapChannel) return;
+  const key = String(selectedEpgMapChannel.stream_id);
+  delete manualEpgMappings[key];
+  const saved = saveEpgMappings();
+  if (saved) epgMappingStatus.textContent = `Manual mapping cleared for ${selectedEpgMapChannel.name ?? 'channel'}.`;
+  epgClearMappingButton.disabled = true;
+  renderEpgMappingResults();
+  if (!epgGuide.classList.contains('hidden')) renderEpgGuide();
+});
 document.querySelectorAll<HTMLButtonElement>('.nav-button').forEach((button) => {
   button.addEventListener('click', () => showPage(button.dataset.page as AppPage));
 });
@@ -1821,6 +2824,7 @@ settingsCategoryType.addEventListener('change', () => {
 });
 $('show-all-categories').addEventListener('click', () => {
   const view = settingsCategoryType.value as CatalogView;
+  if (view === 'movies' || view === 'series') catalogPages[view] = 1;
   const language = activeLanguageFilters[view];
   for (const category of categoriesFor(view)) {
     if (category.category_id === undefined || (language !== 'all' && categoryLanguageTag(category.category_name).toUpperCase() !== language)) continue;
@@ -1834,6 +2838,7 @@ $('show-all-categories').addEventListener('click', () => {
 });
 $('hide-all-categories').addEventListener('click', () => {
   const view = settingsCategoryType.value as CatalogView;
+  if (view === 'movies' || view === 'series') catalogPages[view] = 1;
   const language = activeLanguageFilters[view];
   for (const category of categoriesFor(view)) {
     if (category.category_id === undefined || (language !== 'all' && categoryLanguageTag(category.category_name).toUpperCase() !== language)) continue;
@@ -1896,59 +2901,118 @@ video.addEventListener('error', () => {
 });
 
 window.addEventListener('keydown', (event) => {
-  const target = event.target as HTMLElement | null;
+  const target = document.activeElement as HTMLElement | null;
   const isArrow = [37, 38, 39, 40].includes(event.keyCode);
-  if (target instanceof HTMLSelectElement) {
-    if (event.keyCode === 13 || event.keyCode === 23 || event.key === ' ' || event.key === 'Enter') {
-      openDropdown = openDropdown === target ? null : target;
+  const isOK = event.keyCode === 13 || event.keyCode === 23 || event.key === 'Enter' || event.key === ' ';
+  const isBack = event.keyCode === 461 || event.keyCode === 10009 || event.key === 'Escape'
+    || (event.key === 'Backspace' && !editingInput);
+
+  if (editingInput) {
+    if (isBack) {
+      event.preventDefault();
+      event.stopPropagation();
+      endInputEditing();
       return;
     }
-    if (isArrow) {
-      if (openDropdown === target && (event.keyCode === 38 || event.keyCode === 40)) return;
-      if (openDropdown === target) openDropdown = null;
+    if (isArrow) return;
+  }
+
+  if (activeDropdown) {
+    if (isBack) {
       event.preventDefault();
+      event.stopPropagation();
+      closeDropdownSelection(false);
+      return;
+    }
+    if (event.keyCode === 38 || event.keyCode === 40) {
+      event.preventDefault();
+      event.stopPropagation();
+      moveDropdownHighlight(event.keyCode === 40 ? 1 : -1);
+      return;
+    }
+    if (isOK && target?.classList.contains('dropdown-option')) {
+      event.preventDefault();
+      event.stopPropagation();
+      const value = (target as HTMLButtonElement).dataset.value;
+      if (value !== undefined) commitDropdownValue(activeDropdown, value);
+      return;
+    }
+    if (event.keyCode === 37 || event.keyCode === 39) {
+      event.preventDefault();
+      event.stopPropagation();
+      const trigger = activeDropdown.trigger;
+      closeDropdownSelection(false);
+      trigger.focus();
       moveDirectionalFocus(event.keyCode);
       return;
     }
   }
-  const isSearchVertical = target === searchInput && (event.keyCode === 38 || event.keyCode === 40);
-  const isPreferenceVertical = (target === audioLanguagePreferencesInput || target === subtitleLanguagePreferencesInput)
-    && (event.keyCode === 38 || event.keyCode === 40);
-  const isEmptySearchNavigation = target === searchInput && !searchInput.value.trim();
-  const isTextEntry = !!target && ((target.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((target as HTMLInputElement).type))
-    || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable);
-  if (isArrow && playerLayer.classList.contains('hidden')) {
-    if (target === searchInput && (event.keyCode === 37 || event.keyCode === 39)) {
-      event.preventDefault();
-      (event.keyCode === 39 ? categorySelect : catalogTypeSelect).focus();
-      return;
-    }
-    if ((!isTextEntry || isSearchVertical || isPreferenceVertical || isEmptySearchNavigation) && moveDirectionalFocus(event.keyCode)) { event.preventDefault(); return; }
-    if (isSearchVertical || isPreferenceVertical) { event.preventDefault(); return; }
-    if (isEmptySearchNavigation) { event.preventDefault(); return; }
-    if (!isTextEntry && currentPage === 'settings') { event.preventDefault(); return; }
-  }
-  const isBack = event.keyCode === 461 || event.keyCode === 10009 || event.key === 'Escape' || (event.key === 'Backspace' && !isTextEntry);
+
   if (isBack) {
     event.preventDefault();
+    event.stopPropagation();
     handleBackPress();
     return;
   }
+
+  if (isOK && target) {
+    const proxyInput = Array.from(inputProxies.entries()).find(([, proxy]) => proxy === target)?.[0];
+    if (proxyInput) {
+      event.preventDefault();
+      event.stopPropagation();
+      beginInputEditing(proxyInput);
+      return;
+    }
+    const dropdown = Array.from(dropdownControls.values()).find((control) => control.trigger === target);
+    if (dropdown) {
+      event.preventDefault();
+      event.stopPropagation();
+      openDropdownSelection(dropdown);
+      return;
+    }
+  }
+
+  if (isOK && !playerLayer.classList.contains('hidden') && selectedChannel && epgGuide.classList.contains('hidden')) {
+    if (openTrackMenu) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const channel = selectedChannel;
+    void openEpgGuide().then(() => showEpgProgramDetails(channel, currentProgramForChannel(channel)));
+    return;
+  }
+
+  if (isArrow && playerLayer.classList.contains('hidden')) {
+    const searchProxy = inputProxies.get(searchInput);
+    if (target === searchProxy && (event.keyCode === 37 || event.keyCode === 39)) {
+      event.preventDefault();
+      event.stopPropagation();
+      focusDropdownTrigger(event.keyCode === 39 ? categorySelect : catalogTypeSelect);
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    moveDirectionalFocus(event.keyCode);
+    return;
+  }
+
   if (playerLayer.classList.contains('hidden')) return;
   if ([37, 38, 39, 40].includes(event.keyCode)) {
     if ((event.keyCode === 37 || event.keyCode === 39) && target === seekBar) {
       event.preventDefault();
+      event.stopPropagation();
       beginSeekHold(event.keyCode === 37 ? -1 : 1);
       return;
     }
     if (event.keyCode === 37 || event.keyCode === 39) {
       event.preventDefault();
+      event.stopPropagation();
       moveDirectionalFocus(event.keyCode);
       return;
     }
     if (event.keyCode === 38 || event.keyCode === 40) {
       if (moveDirectionalFocus(event.keyCode)) event.preventDefault();
       else event.preventDefault();
+      event.stopPropagation();
       return;
     }
   }
@@ -1965,11 +3029,6 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
-document.querySelectorAll<HTMLSelectElement>('select').forEach((select) => {
-  select.addEventListener('click', (event) => { if (event.detail > 0) openDropdown = select; });
-  select.addEventListener('blur', () => { if (openDropdown === select) openDropdown = null; });
-});
-
 window.addEventListener('keyup', (event) => {
   if (event.keyCode === 37 || event.keyCode === 39) stopSeekHold();
 });
@@ -1983,13 +3042,14 @@ try {
   sidebar.classList.toggle('collapsed', localStorage.getItem('nextflix.sidebar-collapsed.v1') === 'true');
 } catch { /* Defaults are used when local storage is unavailable. */ }
 loadWatchHistory();
+populateLanguagePreferences();
 try {
   const savedTrackPreferences = JSON.parse(localStorage.getItem(TRACK_PREFERENCES_KEY) ?? 'null') as { audio?: unknown; subtitles?: unknown } | null;
-  if (Array.isArray(savedTrackPreferences?.audio)) preferredAudioLanguages = savedTrackPreferences.audio.map(String).filter(Boolean);
-  if (Array.isArray(savedTrackPreferences?.subtitles)) preferredSubtitleLanguages = savedTrackPreferences.subtitles.map(String).filter(Boolean);
+  if (Array.isArray(savedTrackPreferences?.audio)) preferredAudioLanguages = savedTrackPreferences.audio.map(String).filter(Boolean).slice(0, 1);
+  if (Array.isArray(savedTrackPreferences?.subtitles)) preferredSubtitleLanguages = savedTrackPreferences.subtitles.map(String).filter(Boolean).slice(0, 1);
 } catch { /* Use the built-in language preference order. */ }
-audioLanguagePreferencesInput.value = preferredAudioLanguages.join(',');
-subtitleLanguagePreferencesInput.value = preferredSubtitleLanguages.join(',');
+audioLanguagePreferencesInput.value = preferredAudioLanguages[0] ?? '';
+subtitleLanguagePreferencesInput.value = preferredSubtitleLanguages[0] ?? '';
 
 const savedProvider = readSavedProvider();
 const localProvider = {
@@ -2014,4 +3074,7 @@ if (localProvider.base && localProvider.username && localProvider.password) {
   setMessage('Reconnecting with the login saved on this TV…');
   window.setTimeout(() => { void loadProvider({ startup: true }); }, 300);
 }
+
+setupDropdowns();
+setupInputProxies();
 

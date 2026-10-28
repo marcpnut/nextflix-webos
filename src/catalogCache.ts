@@ -7,6 +7,8 @@ export type CatalogChannel = {
   stream_icon?: string;
   category_id?: string | number;
   epg_channel_id?: string;
+  tv_archive?: boolean | number | string;
+  tv_archive_duration?: number | string;
 };
 
 export type CatalogMovie = {
@@ -56,9 +58,12 @@ export type CachedCatalog = {
   liveFormat?: string;
 };
 
+export type CachedEpg = { key: string; sourceHash: string; savedAt: number; channels: unknown[]; programs: unknown[] };
+
 const DATABASE = 'nextflix-catalog-cache';
 const STORE = 'catalogs';
-const DATABASE_VERSION = 1;
+const EPG_STORE = 'epg';
+const DATABASE_VERSION = 2;
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -70,11 +75,40 @@ function openDatabase(): Promise<IDBDatabase> {
     request.onupgradeneeded = () => {
       const database = request.result;
       if (!database.objectStoreNames.contains(STORE)) database.createObjectStore(STORE, { keyPath: 'key' });
+      if (!database.objectStoreNames.contains(EPG_STORE)) database.createObjectStore(EPG_STORE, { keyPath: 'key' });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error('Could not open catalog storage.'));
     request.onblocked = () => reject(new Error('Catalog storage is busy.'));
   });
+}
+
+export async function readEpgSnapshot(key: string): Promise<CachedEpg | null> {
+  const database = await openDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const request = database.transaction(EPG_STORE, 'readonly').objectStore(EPG_STORE).get(key);
+      request.onsuccess = () => resolve((request.result as CachedEpg | undefined) ?? null);
+      request.onerror = () => reject(request.error ?? new Error('Could not read the saved TV guide.'));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function writeEpgSnapshot(snapshot: CachedEpg): Promise<void> {
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(EPG_STORE, 'readwrite');
+      transaction.objectStore(EPG_STORE).put(snapshot);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('Could not save the TV guide.'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('TV guide save was interrupted.'));
+    });
+  } finally {
+    database.close();
+  }
 }
 
 export async function readCatalog(key: string): Promise<CachedCatalog | null> {
