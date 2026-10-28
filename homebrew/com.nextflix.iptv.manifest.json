@@ -1,16 +1,16 @@
 {
   "id": "com.nextflix.iptv",
-  "version": "0.6.6",
+  "version": "0.6.7",
   "type": "web",
   "title": "NextFlix",
-  "appDescription": "A lightweight IPTV player with TMDB movie and series metadata and optional external subtitles.",
+  "appDescription": "A lightweight IPTV player with cached TMDB home playlists and optional external subtitles.",
   "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/largeIcon.png",
   "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
   "rootRequired": false,
-  "ipkUrl": "https://github.com/marcpnut/nextflix-webos/releases/download/v0.6.6/com.nextflix.iptv_0.6.6_all.ipk",
+  "ipkUrl": "https://github.com/marcpnut/nextflix-webos/releases/download/v0.6.7/com.nextflix.iptv_0.6.7_all.ipk",
   "ipkHash": {
-    "sha256": "c8d7a142ce894cb8b1ccd077048833e02846435580fb7976e193d3e866527309"
+    "sha256": "0bd1a38928e9fce7599aff5a46f8f061d77444d28d665826a2a7ef6d66c279d8"
   },
-  "ipkSize": 55902,
-  "installedSize": 185000
+  "ipkSize": 58886,
+  "installedSize": 176672
 }

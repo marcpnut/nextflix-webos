@@ -21,11 +21,33 @@ type TmdbSearchItem = {
   overview?: string;
 };
 type TmdbSearchResponse = { results?: TmdbSearchItem[] };
+type TmdbListResponse = { results?: TmdbSearchItem[] };
 type TmdbDetails = TmdbSearchItem & {
   genres?: Array<{ name?: string }>;
   credits?: { cast?: Array<{ name?: string }> };
 };
 const memory = new Map<string, TmdbMetadata | null>();
+const TMDB_METADATA_CACHE_KEY = 'nextflix.tmdb-metadata-cache.v1';
+const TMDB_METADATA_CACHE_LIMIT = 120;
+const TMDB_METADATA_CACHE_AGE = 90 * 24 * 60 * 60 * 1000;
+type CachedMetadata = { savedAt: number; value: TmdbMetadata | null };
+let persistentCache: Record<string, CachedMetadata> | null = null;
+
+export type TmdbHomePlaylist = 'featured-movies' | 'featured-series' | 'popular-movies' | 'top-rated-movies'
+  | 'now-playing-movies' | 'upcoming-movies' | 'popular-series' | 'top-rated-series' | 'airing-today-series' | 'on-the-air-series';
+export type TmdbHomeEntry = { id: number; title: string; year: string; poster?: string; backdrop?: string; overview: string };
+export const TMDB_HOME_PLAYLISTS: Array<{ id: TmdbHomePlaylist; label: string; kind: 'movie' | 'series'; path: string }> = [
+  { id: 'featured-movies', label: 'Featured Movies', kind: 'movie', path: 'trending/movie/week' },
+  { id: 'featured-series', label: 'Featured Series', kind: 'series', path: 'trending/tv/week' },
+  { id: 'popular-movies', label: 'Popular Movies', kind: 'movie', path: 'movie/popular' },
+  { id: 'top-rated-movies', label: 'Top Rated Movies', kind: 'movie', path: 'movie/top_rated' },
+  { id: 'now-playing-movies', label: 'Now Playing Movies', kind: 'movie', path: 'movie/now_playing' },
+  { id: 'upcoming-movies', label: 'Upcoming Movies', kind: 'movie', path: 'movie/upcoming' },
+  { id: 'popular-series', label: 'Popular Series', kind: 'series', path: 'tv/popular' },
+  { id: 'top-rated-series', label: 'Top Rated Series', kind: 'series', path: 'tv/top_rated' },
+  { id: 'airing-today-series', label: 'Airing Today', kind: 'series', path: 'tv/airing_today' },
+  { id: 'on-the-air-series', label: 'On The Air', kind: 'series', path: 'tv/on_the_air' }
+];
 
 export function cleanTitle(raw: string): string {
   return raw.replace(/^\s*(?:[A-Z]{2,5}|NF|MULTI)\s*[-|:]\s*/i, '')
@@ -78,12 +100,70 @@ function imageUrl(path: string | null | undefined, size: 'w500' | 'w780'): strin
   return path && path.startsWith('/') ? `https://image.tmdb.org/t/p/${size}${path}` : undefined;
 }
 
+function loadPersistentCache(): Record<string, CachedMetadata> {
+  if (persistentCache) return persistentCache;
+  persistentCache = {};
+  try {
+    const saved = JSON.parse(localStorage.getItem(TMDB_METADATA_CACHE_KEY) ?? '{}') as Record<string, CachedMetadata>;
+    const cutoff = Date.now() - TMDB_METADATA_CACHE_AGE;
+    for (const [key, entry] of Object.entries(saved)) {
+      if (entry && Number.isFinite(entry.savedAt) && entry.savedAt >= cutoff) persistentCache[key] = entry;
+    }
+  } catch { /* TMDB still works when local storage is unavailable. */ }
+  return persistentCache;
+}
+
+function cacheMetadata(key: string, value: TmdbMetadata | null): void {
+  memory.set(key, value);
+  while (memory.size > TMDB_METADATA_CACHE_LIMIT) memory.delete(memory.keys().next().value!);
+  const cache = loadPersistentCache();
+  cache[key] = { savedAt: Date.now(), value };
+  const oldestFirst = Object.entries(cache).sort((left, right) => left[1].savedAt - right[1].savedAt);
+  while (oldestFirst.length > TMDB_METADATA_CACHE_LIMIT) delete cache[oldestFirst.shift()![0]];
+  try { localStorage.setItem(TMDB_METADATA_CACHE_KEY, JSON.stringify(cache)); } catch { /* Keep the in-memory entry if storage is full. */ }
+}
+
+export function clearTmdbMetadataCache(): void {
+  memory.clear();
+  persistentCache = {};
+  try { localStorage.removeItem(TMDB_METADATA_CACHE_KEY); } catch { /* Storage cleanup is best-effort. */ }
+}
+
+export function normalizeTmdbTitle(value: string): string {
+  return comparable(cleanTitle(value));
+}
+
+export async function fetchTmdbHomePlaylist(playlist: TmdbHomePlaylist, apiKey: string): Promise<TmdbHomeEntry[]> {
+  const config = TMDB_HOME_PLAYLISTS.find((item) => item.id === playlist);
+  if (!config || !apiKey.trim()) return [];
+  const request = apiUrl(config.path, apiKey, { language: 'en-US', page: '1' });
+  const response = await getJson<TmdbListResponse>(request.url, request.headers);
+  return (response.results ?? []).slice(0, 20).flatMap((item) => {
+    if (!item.id) return [];
+    const title = itemTitle(item);
+    if (!title) return [];
+    return [{
+      id: item.id,
+      title,
+      year: itemYear(item),
+      poster: imageUrl(item.poster_path, 'w500'),
+      backdrop: imageUrl(item.backdrop_path, 'w780'),
+      overview: String(item.overview ?? '').trim()
+    }];
+  });
+}
+
 export async function findTmdbMetadata(kind: 'movie' | 'series', rawTitle: string, rawYear: string, apiKey: string): Promise<TmdbMetadata | null> {
   const title = cleanTitle(rawTitle);
   const year = rawYear.match(/\b(?:19|20)\d{2}\b/)?.[0] ?? rawTitle.match(/\((\d{4})\)/)?.[1] ?? '';
   if (!apiKey.trim() || title.length < 2) return null;
   const cacheKey = `${kind}:${comparable(title)}:${year}`;
   if (memory.has(cacheKey)) return memory.get(cacheKey) ?? null;
+  const cached = loadPersistentCache()[cacheKey];
+  if (cached) {
+    memory.set(cacheKey, cached.value);
+    return cached.value;
+  }
 
   const searchPath = kind === 'movie' ? 'search/movie' : 'search/tv';
   const searchParams: Record<string, string> = { query: title, include_adult: 'false', language: 'en-US' };
@@ -97,7 +177,7 @@ export async function findTmdbMetadata(kind: 'movie' | 'series', rawTitle: strin
       && (!year || !itemYear(item) || Math.abs(Number(itemYear(item)) - Number(year)) <= 1);
   }).sort((a, b) => Number(!!b.overview) - Number(!!a.overview));
   const match = candidates[0];
-  if (!match?.id) { memory.set(cacheKey, null); return null; }
+  if (!match?.id) { cacheMetadata(cacheKey, null); return null; }
 
   const detailsRequest = apiUrl(`${kind === 'movie' ? 'movie' : 'tv'}/${match.id}`, apiKey,
     { language: 'en-US', append_to_response: 'credits' });
@@ -111,7 +191,6 @@ export async function findTmdbMetadata(kind: 'movie' | 'series', rawTitle: strin
     backdrop: imageUrl(details.backdrop_path ?? match.backdrop_path, 'w780'),
     tmdbId: details.id ?? match.id
   };
-  memory.set(cacheKey, metadata);
-  if (memory.size > 80) memory.delete(memory.keys().next().value!);
+  cacheMetadata(cacheKey, metadata);
   return metadata;
 }

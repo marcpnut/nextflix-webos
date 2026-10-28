@@ -1,4 +1,4 @@
-# NextFlix — Development version 0.6.6
+# NextFlix — Development version 0.6.7
 
 Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 
@@ -27,6 +27,10 @@ Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 - Load a single M3U playlist URL, parse `group-title` and `tvg-logo`, and play its channel URLs directly.
 - Browse from a collapsible sidebar with Home, Search, Movies, Series, Live TV, My List, and Settings.
 - Show a featured title and poster rows on Home; open title details before playback.
+- Show Featured Movies and Featured Series from TMDB alongside recently added and popular provider titles; configure additional TMDB rows in Settings. Home playlist and title metadata caches persist locally.
+- Display a softly faded poster/backdrop when a stream fails, while keeping the playback error visible.
+- Reuse cached IPTV catalogs immediately, refresh movie/series catalogs with bounded concurrent requests, and avoid repeated large cache writes during refresh.
+- Use a full-bleed single-color app icon with a clean NextFlix NF monogram, without a frame that can be clipped by different TV icon masks.
 - Save movies and series to a local My List.
 - Hide and restore provider categories; hidden categories are excluded from browsing, Home, and search.
 - Filter Live TV, Movies, Series, and Settings using the literal text before `|` or between the first two pipes (for example, `NL/PL | ...` or `|NL| ...`). Options are derived from category names; the filter is hidden on Home.
@@ -122,5 +126,5 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - [x] Phase 7 storage safeguard: bound rebuildable IndexedDB snapshots to two catalogs, pruning entries older than 14 days.
 - [ ] Phase 7 TV validation: verify backup file export/import and passphrase handling, cache cleanup preserves profiles/history, diagnostics report gracefully, and the optional release check works on TV.
 - [ ] Phase 7 feasibility item: local phone pairing/LAN transfer remains unavailable to ordinary packaged apps without a listener service; keep manual entry and encrypted backup as the safe alternatives.
-- [ ] Phase 8 local gate: rebuild and package 0.6.6 before release.
-- [ ] Phase 8 TV gate: verify 0.6.6 player navigation, subtitle overlays, TV scroll arrows, focus visibility at all grid edges, metadata, and external subtitle behavior on the LG.
+- [ ] Phase 8 local gate: rebuild and package 0.6.7 before release.
+- [ ] Phase 8 TV gate: verify 0.6.7 player navigation, subtitle overlays, TV scroll arrows, focus visibility at all grid edges, metadata, and external subtitle behavior on the LG.

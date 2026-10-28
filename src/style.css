@@ -72,6 +72,7 @@ select option { color: #fff; background: #1c1e27; }
 .sidebar-profile-caption { color: #a4a5b2; font-size: 11px; font-weight: 700; letter-spacing: 1.5px; }
 .sidebar-profile strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-profile button { min-height: 42px; padding: 0 10px; text-align: left; }
+.profile-switch-icon { display: none; width: 28px; height: 28px; object-fit: contain; }
 .nav-button { display: flex; align-items: center; gap: 18px; width: 100%; min-height: 58px; text-align: left; border-color: transparent; background: transparent; }
 .nav-icon { display: block; flex: 0 0 32px; width: 32px; height: 32px; object-fit: contain; }
 .nav-button > span { min-width: 0; }
@@ -81,7 +82,8 @@ select option { color: #fff; background: #1c1e27; }
 .sidebar.collapsed .nav-button > span { display: none; }
 .sidebar.collapsed .sidebar-profile { padding-left: 0; padding-right: 0; }
 .sidebar.collapsed .sidebar-profile-caption, .sidebar.collapsed .sidebar-profile strong { display: none; }
-.sidebar.collapsed .sidebar-profile button { min-height: 54px; padding: 0; overflow: hidden; font-size: 11px; text-align: center; }
+.sidebar.collapsed .sidebar-profile button { display: grid; min-height: 54px; place-items: center; padding: 0; overflow: hidden; font-size: 0; text-align: center; }
+.sidebar.collapsed .profile-switch-icon { display: block; }
 .app-content { flex: 1; min-width: 0; height: 100%; overflow-y: auto; padding: 38px 48px 64px; }
 .app-content.live-channel-layout { display: flex; flex-direction: column; overflow: hidden; padding-bottom: 24px; }
 .language-filter { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 22px; }
@@ -90,8 +92,8 @@ select option { color: #fff; background: #1c1e27; }
 .language-choice.selected { border-color: #f04455; background: #38313a; }
 .library { max-width: 1440px; margin: 0 auto; }
 .live-preview { position: relative; width: 100%; height: min(46vh, 520px); min-height: 280px; margin: 0 0 22px; overflow: hidden; border-radius: 10px; background: #000; }
-#live-preview video { display: block; width: 100%; height: 100%; object-fit: cover; background: #000; }
-.live-preview-status { position: absolute; z-index: 1; right: 0; bottom: 0; left: 0; display: grid; gap: 6px; padding: 58px 20px 18px; background: linear-gradient(transparent, #000d); pointer-events: none; }
+#live-preview video { position: relative; z-index: 1; display: block; width: 100%; height: 100%; object-fit: cover; background: #000; }
+.live-preview-status { position: absolute; z-index: 2; right: 0; bottom: 0; left: 0; display: grid; gap: 6px; padding: 58px 20px 18px; background: linear-gradient(transparent, #000d); pointer-events: none; }
 .live-preview-status strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 25px; }
 .live-preview-status > span:not(.eyebrow) { color: #d5d5dc; font-size: 15px; }
 .live-preview-status .live-preview-hint { color: #a4a5b2; font-size: 13px; }
@@ -157,6 +159,11 @@ select option { color: #fff; background: #1c1e27; }
 .track-preferences h2 { font-size: 24px; }
 .track-preferences label { display: grid; gap: 8px; }
 .settings-actions { display: flex; gap: 12px; margin-bottom: 18px; }
+.home-playlist-settings { max-width: 1000px; }
+.home-playlist-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; max-width: 900px; }
+.home-playlist-option { display: flex; align-items: center; min-height: 54px; gap: 12px; margin: 0; padding: 8px 14px; border-radius: 8px; background: #1c1e27; }
+.home-playlist-option input { flex: 0 0 26px; width: 26px; height: 26px; min-height: 26px; padding: 0; accent-color: #f04455; }
+.home-playlist-option:focus-within { outline: 3px solid #bd3544; outline-offset: 2px; }
 .settings-account { max-width: 900px; margin-top: 36px; padding-top: 24px; border-top: 1px solid #323541; }
 .settings-account h2 { margin: 0 0 14px; font-size: 24px; }
 .maintenance-settings { max-width: 1000px; margin-top: 38px; padding-top: 26px; border-top: 1px solid #323541; }
@@ -185,9 +192,12 @@ select option { color: #fff; background: #1c1e27; }
 .category-visibility-item { display: flex; align-items: center; gap: 12px; min-height: 58px; padding: 8px 14px; border-radius: 8px; background: #1c1e27; }
 .category-visibility-item:focus-within { outline: 3px solid #bd3544; outline-offset: 2px; background: #292c36; }
 .category-visibility-item input { width: 26px; height: 26px; accent-color: #f04455; }
-.player { position: fixed; inset: 0; z-index: 10; background: #000; }
-.player video { width: 100%; height: 100%; object-fit: contain; background: #000; }
-.player-top, .player-bottom { position: absolute; left: 0; right: 0; display: flex; align-items: center; padding: 28px 48px; }
+.player { position: fixed; inset: 0; z-index: 10; overflow: hidden; background: #000; }
+.player video { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.stream-fallback-art { position: absolute; z-index: 0; inset: 0; display: block; width: 100%; height: 100%; object-fit: cover; opacity: 0; filter: blur(5px); transform: scale(1.025); pointer-events: none; transition: opacity .25s ease; }
+.player.stream-failed .stream-fallback-art, .live-preview.stream-failed .stream-fallback-art { opacity: .2; }
+.player.stream-failed video, .live-preview.stream-failed video { opacity: 0; }
+.player-top, .player-bottom { position: absolute; z-index: 2; left: 0; right: 0; display: flex; align-items: center; padding: 28px 48px; }
 .player-top, .player-bottom { transition: opacity .22s ease, visibility .22s ease; }
 .player.controls-hidden .player-top, .player.controls-hidden .player-bottom { opacity: 0; visibility: hidden; pointer-events: none; }
 .player-top { top: 0; gap: 24px; background: linear-gradient(#000c, transparent); }
@@ -254,6 +264,7 @@ select option { color: #fff; background: #1c1e27; }
   .app-content { padding: 24px; }
   .detail-layout { grid-template-columns: 220px 1fr; gap: 24px; }
   .category-visibility-list { grid-template-columns: 1fr; }
+  .home-playlist-options { grid-template-columns: 1fr; }
   .track-preferences { grid-template-columns: 1fr; }
   .track-preferences h2, .track-preferences p { grid-column: auto; }
   .next-episode-prompt { flex-wrap: wrap; justify-content: center; bottom: 168px; }
@@ -267,4 +278,42 @@ select option { color: #fff; background: #1c1e27; }
 @media (max-width: 700px) {
   .library-heading { flex-direction: column; align-items: stretch; gap: 12px; }
   .library-actions { justify-content: flex-start; }
+}
+
+/* Chromium 79 on webOS 6.5 lacks gap support in flex layouts. */
+.webos-tv .actions, .webos-tv .library-actions, .webos-tv .hero-actions,
+.webos-tv .settings-actions, .webos-tv .catalog-pagination,
+.webos-tv .player-controls, .webos-tv .confirm-actions, .webos-tv .language-filter,
+.webos-tv .library-heading, .webos-tv .connection-state, .webos-tv .remember-label,
+.webos-tv .nav-button, .webos-tv .channel-card, .webos-tv .category-visibility-item,
+.webos-tv .home-playlist-option, .webos-tv .password-field, .webos-tv .player-top,
+.webos-tv .player-bottom, .webos-tv .seek-row, .webos-tv .next-episode-prompt { gap: 0; }
+.webos-tv .actions > * + * { margin-left: 18px; }
+.webos-tv .library-actions > * + * { margin-left: 14px; }
+.webos-tv .hero-actions > * + * { margin-left: 14px; }
+.webos-tv .hero-actions > button { margin-right: 0; }
+.webos-tv .settings-actions > * + * { margin-left: 12px; }
+.webos-tv .catalog-pagination > * + * { margin-left: 24px; }
+.webos-tv .player-controls > * + * { margin-left: 28px; }
+.webos-tv .confirm-actions > * + * { margin-left: 16px; }
+.webos-tv .language-filter > * + * { margin-left: 12px; }
+.webos-tv .library-heading > * + * { margin-left: 24px; }
+.webos-tv .connection-state::before { margin-right: 10px; }
+.webos-tv .message.loading, .webos-tv .primary.connecting { gap: 0; }
+.webos-tv .message.loading::before, .webos-tv .primary.connecting::before { margin-right: 12px; }
+.webos-tv .remember-label input { margin-right: 12px; }
+.webos-tv .nav-button .nav-icon { margin-right: 18px; }
+.webos-tv .sidebar.collapsed .nav-button .nav-icon { margin-right: 0; }
+.webos-tv .channel-card > * + * { margin-left: 15px; }
+.webos-tv .category-visibility-item > * + *, .webos-tv .home-playlist-option > * + * { margin-left: 12px; }
+.webos-tv .password-field > * + * { margin-left: 10px; }
+.webos-tv .player-top > * + * { margin-left: 24px; }
+.webos-tv .player-bottom > * + *, .webos-tv .next-episode-prompt > * + * { margin-left: 14px; }
+.webos-tv .player-bottom > * + * { margin-top: 10px; margin-left: 0; }
+.webos-tv .seek-row > * + * { margin-left: 18px; }
+.webos-tv .poster-tile { gap: 0; }
+.webos-tv .poster-tile img + span, .webos-tv .continue-tile > * + * { margin-top: 8px; }
+@media (max-width: 900px) {
+  .webos-tv .library-heading > * + * { margin-left: 0; }
+  .webos-tv .actions > * + * { margin-left: 0; margin-top: 12px; }
 }

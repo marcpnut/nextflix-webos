@@ -1,4 +1,4 @@
-# NextFlix 0.6.1 TV release checklist
+# NextFlix 0.6.7 TV release checklist
 
 Use the Homebrew **Update** action over the installed NextFlix app. Keep the same app ID (`com.nextflix.iptv`) and do not uninstall the old version: uninstalling can remove locally saved credentials and profiles.
 
@@ -6,11 +6,11 @@ Use the Homebrew **Update** action over the installed NextFlix app. Keep the sam
 
 - Confirm the TV is the LG 55NANO886PB on webOS 6.5.3 / Pear webOS.
 - Record the currently installed NextFlix version. If the current build offers encrypted backup export and the TV can save the file, make a backup first.
-- Confirm the Homebrew manifest identifies version 0.6.1 and its package hash matches the release asset.
+- Confirm the Homebrew manifest identifies version 0.6.7 and its package hash matches the release asset.
 
 ## Smoke test after updating
 
-1. Launch NextFlix. Confirm it shows 0.6.1, retains the saved provider login, and opens cached channels quickly.
+1. Launch NextFlix. Confirm it shows 0.6.7, retains the saved provider login, and opens cached channels quickly.
 2. Open Live TV. Select a channel for preview, select it again for full screen, switch with Channel Up/Down, and exit with Back.
 3. Confirm only the channel list scrolls. Open TV Guide; the preview should fill the upper area and five guide rows should scroll continuously below it. Check 24-hour time labels and that moving focus does not retune the channel.
 4. Play one movie and one series episode. Check pause, 10-second seeking, resume, Back, and next-episode countdown.

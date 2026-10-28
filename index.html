@@ -53,7 +53,7 @@
             </nav>
             <div class="sidebar-profile">
               <span class="sidebar-profile-caption">VIEWER</span><strong id="active-profile-name">Default</strong>
-              <button id="profile-switch" class="quiet" aria-label="Switch viewer profile">Switch profile</button>
+              <button id="profile-switch" class="quiet" aria-label="Switch viewer profile"><img class="profile-switch-icon" src="icons/profile-switch.png" alt="" />Switch profile</button>
             </div>
           </aside>
           <div class="app-content">
@@ -64,6 +64,7 @@
                 <div class="hero-copy"><div class="eyebrow">FEATURED</div><h1 id="hero-title">Your IPTV library</h1><p id="hero-description">Your movies and series appear here when the catalog has loaded.</p><div class="hero-actions"><button id="hero-play" class="primary">Play</button><button id="hero-browse" class="quiet">Browse movies</button></div></div>
               </div>
               <section id="continue-row" class="home-row hidden"><h2>Continue Watching</h2><div id="home-continue" class="poster-row"></div></section>
+              <div id="home-tmdb-rows" class="home-tmdb-rows"></div>
               <section id="recommended-row" class="home-row hidden"><h2>Recommended For You</h2><div id="home-recommended" class="poster-row"></div></section>
               <section class="home-row"><h2>Recently Added Movies</h2><div id="home-movies" class="poster-row"></div></section>
               <section class="home-row"><h2>Popular Series</h2><div id="home-series" class="poster-row"></div></section>
@@ -81,6 +82,12 @@
                 <h2 id="track-preferences-title">Playback languages</h2>
                 <p class="muted">NextFlix keeps the provider’s main/default audio track. Choose a preferred subtitle language; subtitles stay off if it is unavailable.</p>
                 <label>Preferred subtitle language<select id="subtitle-language-preferences"></select></label>
+              </section>
+              <section class="maintenance-settings home-playlist-settings" aria-labelledby="home-playlist-title">
+                <h2 id="home-playlist-title">Home screen playlists</h2>
+                <p class="muted">Choose TMDB rows to show on Home. Featured Movies and Featured Series are enabled by default. A row only shows titles that match your provider catalog, so every title is available to open from your IPTV service.</p>
+                <p id="home-playlist-status" class="maintenance-status" role="status" aria-live="polite"></p>
+                <div id="home-playlist-options" class="home-playlist-options"></div>
               </section>
               <div class="settings-actions"><button id="show-all-categories">Show all</button><button id="hide-all-categories">Hide all</button></div>
               <div id="category-visibility-list" class="category-visibility-list"></div>
@@ -131,6 +138,7 @@
 
             <section id="library" class="library hidden" aria-label="Media catalogue">
           <section id="live-preview" class="live-preview hidden" aria-label="Selected Live TV channel preview">
+            <img id="preview-fallback-art" class="stream-fallback-art" alt="" />
             <div class="live-preview-status"><span class="eyebrow">LIVE TV PREVIEW</span><strong id="live-preview-title">Select a channel</strong><span id="live-preview-message" role="status" aria-live="polite">Choose a channel to start the preview.</span><span class="live-preview-hint">Select the same channel again to watch full screen.</span></div>
           </section>
           <div class="library-heading">
@@ -181,6 +189,7 @@
       <div id="back-hint" class="back-hint hidden" role="status" aria-live="polite"></div>
 
       <section id="player" class="player hidden" aria-label="Video player">
+        <img id="player-fallback-art" class="stream-fallback-art" alt="" />
         <video id="video" playsinline></video>
         <div class="player-top">
           <button id="close-player" class="player-icon-button player-back" aria-label="Back" title="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></button>

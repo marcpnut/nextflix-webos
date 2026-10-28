@@ -1,0 +1,16 @@
+{
+  "id": "com.nextflix.iptv",
+  "version": "0.6.7",
+  "type": "web",
+  "title": "NextFlix",
+  "appDescription": "A lightweight IPTV player with cached TMDB home playlists and optional external subtitles.",
+  "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/largeIcon.png",
+  "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
+  "rootRequired": false,
+  "ipkUrl": "https://github.com/marcpnut/nextflix-webos/releases/download/v0.6.7/com.nextflix.iptv_0.6.7_all.ipk",
+  "ipkHash": {
+    "sha256": "0bd1a38928e9fce7599aff5a46f8f061d77444d28d665826a2a7ef6d66c279d8"
+  },
+  "ipkSize": 58886,
+  "installedSize": 176672
+}

@@ -14,9 +14,10 @@ import {
   type SeriesEpisode
 } from './catalogCache';
 import { decryptBackup, encryptBackup, type BackupPayload } from './backup';
-import { findTmdbMetadata } from './metadata';
+import { clearTmdbMetadataCache, fetchTmdbHomePlaylist, findTmdbMetadata, normalizeTmdbTitle, TMDB_HOME_PLAYLISTS, type TmdbHomeEntry, type TmdbHomePlaylist } from './metadata';
 import { searchOnlineSubtitles, downloadOnlineSubtitle, type OnlineSubtitle } from './opensubtitles';
 import { WebOsMediaSubtitleAdapter, type WebOsSubtitleTrack } from './platform/webos-media';
+if ('PalmSystem' in window) document.documentElement.classList.add('webos-tv');
 
 type XtreamAuth = {
   user_info?: { auth?: number; status?: string; exp_date?: string | null; allowed_output_formats?: string[] };
@@ -62,6 +63,9 @@ const heroPlayButton = $('hero-play') as HTMLButtonElement;
 const heroBrowseButton = $('hero-browse') as HTMLButtonElement;
 const homeMovies = $('home-movies');
 const homeSeries = $('home-series');
+const homeTmdbRows = $('home-tmdb-rows');
+const homePlaylistOptions = $('home-playlist-options');
+const homePlaylistStatus = $('home-playlist-status');
 const homeRecommended = $('home-recommended');
 const recommendedRow = $('recommended-row');
 const homeContinue = $('home-continue');
@@ -103,6 +107,8 @@ const libraryMessage = $('library-message');
 const livePreview = $('live-preview');
 const livePreviewTitle = $('live-preview-title');
 const livePreviewMessage = $('live-preview-message');
+const playerFallbackArt = $('player-fallback-art') as HTMLImageElement;
+const previewFallbackArt = $('preview-fallback-art') as HTMLImageElement;
 const playerLayer = $('player');
 const backupPasswordInput = $('backup-password') as HTMLInputElement;
 const backupFileInput = $('backup-file') as HTMLInputElement;
@@ -142,7 +148,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.6.6';
+const APP_VERSION = '0.6.7';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -180,6 +186,22 @@ const FAVORITES_KEY = 'nextflix.my-list.v1';
 const WATCH_HISTORY_KEY = 'nextflix.watch-history.v1';
 const TRACK_PREFERENCES_KEY = 'nextflix.track-preferences.v1';
 const TMDB_API_KEY = 'nextflix.tmdb-api-key.v1';
+const HOME_PLAYLIST_SETTINGS_KEY = 'nextflix.home-playlists.v1';
+const HOME_PLAYLIST_CACHE_KEY = 'nextflix.home-playlist-cache.v1';
+const HOME_PLAYLIST_CACHE_MS = 12 * 60 * 60 * 1000;
+type CachedHomePlaylist = { savedAt: number; entries: TmdbHomeEntry[] };
+const DEFAULT_HOME_PLAYLISTS: TmdbHomePlaylist[] = ['featured-movies', 'featured-series'];
+let selectedHomePlaylists = DEFAULT_HOME_PLAYLISTS.slice();
+let homePlaylistCache: Partial<Record<TmdbHomePlaylist, CachedHomePlaylist>> = {};
+let homePlaylistRefresh: Promise<void> | null = null;
+
+type SettledResult<T> = { status: 'fulfilled'; value: T } | { status: 'rejected'; reason: unknown };
+function settle<T>(promise: Promise<T>): Promise<SettledResult<T>> {
+  return promise.then(
+    (value) => ({ status: 'fulfilled', value }),
+    (reason: unknown) => ({ status: 'rejected', reason })
+  );
+}
 const LEGACY_OMDB_API_KEY = 'nextflix.omdb-api-key.v1';
 const OPENSUBTITLES_KEY = 'nextflix.opensubtitles-key.v1';
 let tmdbApiKey = '';
@@ -222,7 +244,8 @@ let catalogPages: Record<'movies' | 'series', number> = { movies: 1, series: 1 }
 let catalogTotalPages = 1;
 let selectedChannel: Channel | null = null;
 let returnToLivePreviewOnPlayerClose = false;
-let requestController: AbortController | null = null;
+const requestControllers = new Set<AbortController>();
+let providerLoadGeneration = 0;
 let backPressCount = 0;
 let backPressResetTimer = 0;
 let backHintTimer = 0;
@@ -336,9 +359,8 @@ function normalizedBase(value: string): string {
 
 async function api<T>(action?: string, extra: Record<string, string> = {}, timeoutMs = 60_000): Promise<T> {
   if (!credentials) throw new Error('Connect to a provider first.');
-  requestController?.abort();
   const controller = new AbortController();
-  requestController = controller;
+  requestControllers.add(controller);
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   const query = new URLSearchParams({ username: credentials.username, password: credentials.password, ...extra });
   if (action) query.set('action', action);
@@ -359,7 +381,7 @@ async function api<T>(action?: string, extra: Record<string, string> = {}, timeo
     throw new Error('Could not reach the provider. Check the URL, network, TLS, and browser CORS support.');
   } finally {
     window.clearTimeout(timeout);
-    if (requestController === controller) requestController = null;
+    requestControllers.delete(controller);
   }
 }
 
@@ -424,9 +446,8 @@ function parseM3U(text: string): { channels: Channel[]; categories: Category[] }
 }
 
 async function fetchM3U(url: string): Promise<string> {
-  requestController?.abort();
   const controller = new AbortController();
-  requestController = controller;
+  requestControllers.add(controller);
   const timeout = window.setTimeout(() => controller.abort(), 180_000);
   try {
     const response = await fetch(url, { headers: { Accept: 'audio/x-mpegurl, application/vnd.apple.mpegurl, text/plain, */*' }, signal: controller.signal, cache: 'no-store' });
@@ -438,7 +459,7 @@ async function fetchM3U(url: string): Promise<string> {
     throw new Error('Could not download the M3U playlist. Check its URL, network access, TLS, and browser CORS support.');
   } finally {
     window.clearTimeout(timeout);
-    if (requestController === controller) requestController = null;
+    requestControllers.delete(controller);
   }
 }
 
@@ -1096,17 +1117,21 @@ async function refreshDiagnostics(): Promise<void> {
       `Playback probes: MP4/H.264 ${media.canPlayType('video/mp4; codecs="avc1.42E01E"') || 'unknown'} · HLS ${media.canPlayType('application/vnd.apple.mpegurl') || media.canPlayType('application/x-mpegURL') || 'unknown'}`
     ];
     diagnosticsSummary.textContent = report.join('\n');
-    cacheStatus.textContent = 'Cache cleanup removes only saved catalog snapshots. Profiles, provider login, favorites, history, and settings stay in local storage.';
+    cacheStatus.textContent = 'Cache cleanup removes saved IPTV catalogs and TMDB metadata/artwork rows. Provider login, profiles, favorites, history, and preferences stay saved.';
   } catch (error) {
     diagnosticsSummary.textContent = error instanceof Error ? `Diagnostics unavailable: ${error.message}` : 'Diagnostics are unavailable on this browser.';
   }
 }
 
 async function clearSavedCaches(): Promise<void> {
-  cacheStatus.textContent = 'Clearing the rebuildable catalog cache…';
+  cacheStatus.textContent = 'Clearing saved catalogs and TMDB metadata…';
   try {
     await clearRebuildableCaches();
-    cacheStatus.textContent = 'Cached catalog data cleared. Your provider login, profiles, favorites, watch history, and preferences are preserved.';
+    clearTmdbMetadataCache();
+    try { localStorage.removeItem(HOME_PLAYLIST_CACHE_KEY); } catch { /* The playlist rows remain usable in memory this session. */ }
+    for (const key of Object.keys(homePlaylistCache) as TmdbHomePlaylist[]) delete homePlaylistCache[key];
+    renderTmdbHomeRows();
+    cacheStatus.textContent = 'Cached catalogs and TMDB artwork/details cleared. Your login, profiles, favorites, watch history, and preferences are preserved.';
     await refreshDiagnostics();
   } catch (error) {
     cacheStatus.textContent = error instanceof Error ? error.message : 'Could not clear the app cache.';
@@ -1710,6 +1735,150 @@ function renderPosterRow(container: HTMLElement, kind: 'movie' | 'series', items
   }
 }
 
+function loadHomePlaylistPreferences(): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HOME_PLAYLIST_SETTINGS_KEY) ?? 'null') as unknown;
+    if (Array.isArray(saved)) {
+      selectedHomePlaylists = saved.filter((value): value is TmdbHomePlaylist =>
+        typeof value === 'string' && TMDB_HOME_PLAYLISTS.some((playlist) => playlist.id === value));
+    }
+  } catch { /* Keep the built-in Featured Movies and Featured Series defaults. */ }
+  try {
+    const saved = JSON.parse(localStorage.getItem(HOME_PLAYLIST_CACHE_KEY) ?? '{}') as Partial<Record<TmdbHomePlaylist, CachedHomePlaylist>>;
+    for (const playlist of TMDB_HOME_PLAYLISTS) {
+      const cached = saved[playlist.id];
+      if (cached && Number.isFinite(cached.savedAt) && Array.isArray(cached.entries)) homePlaylistCache[playlist.id] = cached;
+    }
+  } catch { /* Rebuild the optional TMDB rows when the network is available. */ }
+  renderHomePlaylistSettings();
+}
+
+function renderHomePlaylistSettings(): void {
+  clearChildren(homePlaylistOptions);
+  for (const playlist of TMDB_HOME_PLAYLISTS) {
+    const label = document.createElement('label');
+    label.className = 'home-playlist-option';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = selectedHomePlaylists.includes(playlist.id);
+    checkbox.addEventListener('change', () => {
+      selectedHomePlaylists = TMDB_HOME_PLAYLISTS.filter((entry) => {
+        const option = homePlaylistOptions.querySelector<HTMLInputElement>(`input[data-playlist="${entry.id}"]`);
+        return !!option?.checked;
+      }).map((entry) => entry.id);
+      try { localStorage.setItem(HOME_PLAYLIST_SETTINGS_KEY, JSON.stringify(selectedHomePlaylists)); }
+      catch { homePlaylistStatus.textContent = 'The selection is active for this session but could not be saved on this TV.'; }
+      renderTmdbHomeRows();
+      if (currentPage === 'home') void refreshHomePlaylists();
+    });
+    checkbox.dataset.playlist = playlist.id;
+    const text = document.createElement('span');
+    text.textContent = playlist.label;
+    label.append(checkbox, text);
+    homePlaylistOptions.appendChild(label);
+  }
+  homePlaylistStatus.textContent = tmdbApiKey
+    ? 'TMDB playlist data refreshes every 12 hours and is cached on this TV.'
+    : 'Add a TMDB API key below to load these playlists. Cached rows remain available.';
+}
+
+function localYear(item: Movie | Series, kind: 'movie' | 'series'): number {
+  const value = kind === 'movie' ? (item as Movie).year : (item as Series).releaseDate;
+  const match = String(value ?? item.name ?? '').match(/\b(?:19|20)\d{2}\b/);
+  return match ? Number(match[0]) : 0;
+}
+
+function renderTmdbHomeRows(): void {
+  clearChildren(homeTmdbRows);
+  const entriesByTitle = new Map<string, number>();
+  for (const id of selectedHomePlaylists) {
+    for (const entry of homePlaylistCache[id]?.entries ?? []) {
+      const title = normalizeTmdbTitle(entry.title);
+      entriesByTitle.set(title, (entriesByTitle.get(title) ?? 0) + 1);
+    }
+  }
+  const catalogIndexes: Record<'movie' | 'series', Map<string, Array<Movie | Series>>> = {
+    movie: new Map(),
+    series: new Map()
+  };
+  for (const [kind, items] of [['movie', movies], ['series', series]] as const) {
+    const view = kind === 'movie' ? 'movies' : 'series';
+    for (const item of items) {
+      if (!item.name || !isCategoryEnabled(view, item.category_id)) continue;
+      const title = normalizeTmdbTitle(item.name);
+      const matches = catalogIndexes[kind].get(title) ?? [];
+      matches.push(item);
+      catalogIndexes[kind].set(title, matches);
+    }
+  }
+  for (const playlist of TMDB_HOME_PLAYLISTS) {
+    if (!selectedHomePlaylists.includes(playlist.id)) continue;
+    const entries = homePlaylistCache[playlist.id]?.entries ?? [];
+    const catalog = catalogIndexes[playlist.kind];
+    const row = document.createElement('section');
+    row.className = 'home-row tmdb-home-row';
+    const heading = document.createElement('h2');
+    heading.textContent = playlist.label;
+    const list = document.createElement('div');
+    list.className = 'poster-row';
+    for (const entry of entries) {
+      const normalized = normalizeTmdbTitle(entry.title);
+      const matches = catalog.get(normalized) ?? [];
+      if (!matches.length) continue;
+      const year = Number(entry.year);
+      const byYear = matches.filter((item) => {
+        const providerYear = localYear(item, playlist.kind);
+        return !year || !providerYear || Math.abs(providerYear - year) <= 1;
+      });
+      const item = byYear.length === 1 ? byYear[0] : (byYear.length === 0 ? null
+        : (entriesByTitle.get(normalized) === 1 && matches.length === 1 ? byYear[0] : null));
+      if (!item) continue;
+      const card = document.createElement('button');
+      card.className = 'poster-tile';
+      card.type = 'button';
+      card.setAttribute('aria-label', `Open ${playlist.kind}: ${item.name ?? entry.title}`);
+      const posterUrl = (playlist.kind === 'movie' ? (item as Movie).stream_icon : (item as Series).cover) || entry.poster;
+      if (posterUrl) {
+        const image = document.createElement('img');
+        image.src = posterUrl;
+        image.alt = '';
+        image.loading = 'lazy';
+        image.addEventListener('error', () => image.classList.add('hidden'));
+        card.appendChild(image);
+      }
+      const title = document.createElement('span');
+      title.textContent = truncateCardTitle(item.name ?? entry.title, 22);
+      title.title = item.name ?? entry.title;
+      card.appendChild(title);
+      card.addEventListener('click', () => playlist.kind === 'movie' ? showMovieDetails(item as Movie) : showSeriesDetails(item as Series));
+      list.appendChild(card);
+      if (list.children.length >= 12) break;
+    }
+    if (list.children.length) {
+      row.append(heading, list);
+      homeTmdbRows.appendChild(row);
+    }
+  }
+}
+
+function refreshHomePlaylists(): Promise<void> {
+  if (homePlaylistRefresh) return homePlaylistRefresh;
+  const pending = selectedHomePlaylists.filter((id) => !homePlaylistCache[id]
+    || Date.now() - (homePlaylistCache[id]?.savedAt ?? 0) > HOME_PLAYLIST_CACHE_MS);
+  if (!tmdbApiKey || !pending.length) return Promise.resolve();
+  homePlaylistRefresh = (async () => {
+    for (let index = 0; index < pending.length; index += 3) {
+      await Promise.all(pending.slice(index, index + 3).map(async (id) => {
+        try { homePlaylistCache[id] = { savedAt: Date.now(), entries: await fetchTmdbHomePlaylist(id, tmdbApiKey) }; }
+        catch { /* Keep stale rows on screen; the next visit can retry. */ }
+      }));
+    }
+    try { localStorage.setItem(HOME_PLAYLIST_CACHE_KEY, JSON.stringify(homePlaylistCache)); } catch { /* Rows remain in memory this session. */ }
+    renderTmdbHomeRows();
+  })().finally(() => { homePlaylistRefresh = null; });
+  return homePlaylistRefresh;
+}
+
 function categorySignal(view: CatalogView, categoryId?: string | number): string {
   if (categoryId === undefined) return '';
   const category = categoriesFor(view).find((entry) => String(entry.category_id) === String(categoryId));
@@ -1817,6 +1986,10 @@ function renderHome(): void {
   }
   renderPosterRow(homeMovies, 'movie', movies.slice().sort((a, b) => Number(b.added ?? 0) - Number(a.added ?? 0)));
   renderPosterRow(homeSeries, 'series', series);
+  if (currentPage === 'home') {
+    renderTmdbHomeRows();
+    void refreshHomePlaylists();
+  }
   renderContinueWatching();
   renderRecommendations();
 }
@@ -2014,54 +2187,41 @@ async function saveCatalogSnapshot(key: string): Promise<void> {
       allowedFormats: allowedLiveFormats,
       liveFormat: activeLiveFormat ?? undefined
     });
-    await pruneRebuildableCaches();
   } catch {
     // Catalog caching is best-effort on TVs with restricted storage.
   }
 }
 
-async function loadMoviesAndSeries(key: string): Promise<void> {
+async function loadMoviesAndSeries(key: string, generation: number): Promise<void> {
   const warnings: string[] = [];
-  if (!credentials) return;
-  stateLabel.textContent = 'Loading movies in the background…';
-  libraryMessage.textContent = 'Loading movies in the background…';
+  if (!credentials || generation !== providerLoadGeneration) return;
+  stateLabel.textContent = 'Loading movies and series in the background…';
+  libraryMessage.textContent = 'Loading movies and series in the background…';
   libraryMessage.classList.remove('hidden', 'error');
   libraryMessage.classList.add('loading');
-  try {
-    const categoryResponse = await api<Category[]>('get_vod_categories', {}, 120_000);
-    if (Array.isArray(categoryResponse)) movieCategories = categoryResponse;
-    if (catalogView === 'movies') updateCatalogHeading();
-  } catch {
-    warnings.push('movie categories unavailable');
-  }
-  try {
-    const movieResponse = await api<Movie[]>('get_vod_streams', {}, 180_000);
-    if (Array.isArray(movieResponse)) movies = movieResponse.filter((item) => item && item.stream_id !== undefined && item.name);
-  } catch {
-    warnings.push('movies unavailable');
-  }
-  if (!credentials) return;
+  const [movieCategoryResult, seriesCategoryResult] = await Promise.all([
+    settle(api<Category[]>('get_vod_categories', {}, 120_000)),
+    settle(api<Category[]>('get_series_categories', {}, 120_000))
+  ]);
+  if (!credentials || generation !== providerLoadGeneration) return;
+  if (movieCategoryResult.status === 'fulfilled' && Array.isArray(movieCategoryResult.value)) movieCategories = movieCategoryResult.value;
+  else warnings.push('movie categories unavailable');
+  if (seriesCategoryResult.status === 'fulfilled' && Array.isArray(seriesCategoryResult.value)) seriesCategories = seriesCategoryResult.value;
+  else warnings.push('series categories unavailable');
+  if (currentPage === 'movies' || currentPage === 'series') updateCatalogHeading();
+  if (!credentials || generation !== providerLoadGeneration) return;
+  const [movieResult, seriesResult] = await Promise.all([
+    settle(api<Movie[]>('get_vod_streams', {}, 180_000)),
+    settle(api<Series[]>('get_series', {}, 180_000))
+  ]);
+  if (!credentials || generation !== providerLoadGeneration) return;
+  if (movieResult.status === 'fulfilled' && Array.isArray(movieResult.value)) movies = movieResult.value.filter((item) => item && item.stream_id !== undefined && item.name);
+  else warnings.push('movies unavailable');
+  if (seriesResult.status === 'fulfilled' && Array.isArray(seriesResult.value)) series = seriesResult.value.filter((item) => item && item.series_id !== undefined && item.name);
+  else warnings.push('series unavailable');
+  if (!credentials || generation !== providerLoadGeneration) return;
   await saveCatalogSnapshot(key);
-  if (currentPage === 'movies') renderChannels();
-  if (currentPage === 'home') renderHome();
-
-  stateLabel.textContent = 'Loading series in the background…';
-  libraryMessage.textContent = 'Loading series in the background…';
-  try {
-    const categoryResponse = await api<Category[]>('get_series_categories', {}, 120_000);
-    if (Array.isArray(categoryResponse)) seriesCategories = categoryResponse;
-    if (catalogView === 'series') updateCatalogHeading();
-  } catch {
-    warnings.push('series categories unavailable');
-  }
-  try {
-    const seriesResponse = await api<Series[]>('get_series', {}, 180_000);
-    if (Array.isArray(seriesResponse)) series = seriesResponse.filter((item) => item && item.series_id !== undefined && item.name);
-  } catch {
-    warnings.push('series unavailable');
-  }
-  if (!credentials) return;
-  await saveCatalogSnapshot(key);
+  void pruneRebuildableCaches().catch(() => undefined);
   if (!librarySection.classList.contains('hidden')) {
     updateCatalogHeading();
     renderChannels();
@@ -2080,6 +2240,9 @@ async function loadMoviesAndSeries(key: string): Promise<void> {
 }
 
 async function loadProvider(options: { startup?: boolean } = {}): Promise<void> {
+  const generation = ++providerLoadGeneration;
+  for (const controller of requestControllers) controller.abort();
+  requestControllers.clear();
   setBusy(true);
   setProgress('Checking provider URL…');
   let cache: CachedCatalog | null = null;
@@ -2101,6 +2264,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     } catch {
       // A cache failure must never prevent connecting to the provider.
     }
+    if (generation !== providerLoadGeneration) return;
     if (cache && Array.isArray(cache.channels) && cache.channels.length) {
       categories = Array.isArray(cache.categories) ? cache.categories : [];
       channels = cache.channels;
@@ -2139,6 +2303,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     if (sourceType === 'm3u') {
       setProgress('Downloading your M3U playlist…');
       const text = await fetchM3U(base);
+      if (generation !== providerLoadGeneration) return;
       const parsed = parseM3U(text);
       if (!parsed.channels.length) throw new Error('The M3U file contains no valid channel entries.');
       categories = parsed.categories;
@@ -2149,10 +2314,10 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       series = [];
       playbackBase = base;
       activeLiveFormat = null;
-      await writeCatalog({ key: cacheKey, savedAt: Date.now(), sourceType: 'm3u', categories, channels });
-      await pruneRebuildableCaches();
       catalogView = 'live';
       showCatalog();
+      void writeCatalog({ key: cacheKey, savedAt: Date.now(), sourceType: 'm3u', categories, channels })
+        .then(() => pruneRebuildableCaches()).catch(() => undefined);
       libraryMessage.textContent = `${channels.length} channels loaded from M3U.`;
       libraryMessage.classList.remove('hidden', 'loading', 'error');
       document.querySelector<HTMLButtonElement>('.nav-button[data-page="home"]')?.focus();
@@ -2161,6 +2326,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
 
     setProgress('Checking your provider login…');
     const auth = await api<XtreamAuth>(undefined, {}, 60_000);
+    if (generation !== providerLoadGeneration) return;
     assertAuthenticated(auth);
     playbackBase = providerPlaybackServer(auth, base);
     activeLiveFormat = chooseLiveFormat(auth);
@@ -2170,24 +2336,27 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       categoryWarning = 'Categories are unavailable; showing channels without category names. ';
       return cache?.categories ?? [];
     });
+    if (generation !== providerLoadGeneration) return;
     categories = Array.isArray(categoryResponse) ? categoryResponse : [];
 
     setProgress('Login accepted. Loading live channels; this can take a few minutes…');
     const channelResponse = await api<Channel[]>('get_live_streams', {}, 180_000);
+    if (generation !== providerLoadGeneration) return;
     if (!Array.isArray(channelResponse)) throw new Error('Provider returned an invalid live channel list.');
     channels = channelResponse.filter((channel) => channel && channel.stream_id !== undefined && channel.name);
     if (!channels.length) throw new Error('The provider account has no live channels.');
 
-    await saveCatalogSnapshot(cacheKey);
     showCatalog();
+    void saveCatalogSnapshot(cacheKey);
     passwordInput.value = '';
     if (categoryWarning) {
       libraryMessage.textContent = categoryWarning;
       libraryMessage.classList.remove('hidden', 'loading');
     }
     document.querySelector<HTMLButtonElement>('.nav-button[data-page="home"]')?.focus();
-    if (sourceType === 'xtream') window.setTimeout(() => { void loadMoviesAndSeries(cacheKey); }, 0);
+    if (sourceType === 'xtream') window.setTimeout(() => { void loadMoviesAndSeries(cacheKey, generation); }, 0);
   } catch (error) {
+    if (generation !== providerLoadGeneration) return;
     const safeMessage = error instanceof Error ? error.message : 'Connection failed.';
     if (cache && channels.length) {
       libraryMessage.textContent = `Could not refresh channels. Showing the saved list. ${safeMessage}`;
@@ -2200,7 +2369,7 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       stateLabel.textContent = 'Connection failed';
     }
   } finally {
-    setBusy(false);
+    if (generation === providerLoadGeneration) setBusy(false);
   }
 }
 
@@ -2364,8 +2533,33 @@ function moveVideoToPlayer(): void {
   if (video.parentElement !== playerLayer) playerLayer.insertBefore(video, playerLayer.firstChild);
 }
 
+function setFallbackArtwork(source?: string): void {
+  for (const image of [playerFallbackArt, previewFallbackArt]) {
+    if (source) {
+      image.src = source;
+      image.classList.remove('hidden');
+    } else {
+      image.removeAttribute('src');
+      image.classList.add('hidden');
+    }
+  }
+}
+
+function showStreamFallbackArtwork(): void {
+  if (video.parentElement === livePreview) livePreview.classList.add('stream-failed');
+  else if (!playerLayer.classList.contains('hidden')) playerLayer.classList.add('stream-failed');
+}
+
+function clearStreamFallbackState(): void {
+  playerLayer.classList.remove('stream-failed');
+  livePreview.classList.remove('stream-failed');
+}
+
 function showLiveChannelFullscreen(): void {
   if (!selectedChannel) return;
+  const streamFailed = livePreview.classList.contains('stream-failed');
+  livePreview.classList.remove('stream-failed');
+  playerLayer.classList.toggle('stream-failed', streamFailed);
   moveVideoToPlayer();
   livePreview.classList.add('hidden');
   playerLayer.classList.remove('hidden');
@@ -2473,6 +2667,11 @@ async function startPlayback(
   playerLayer.classList.remove('controls-hidden');
   webOsSubtitleAdapter.stop();
   manualSubtitleTrack = null;
+  clearStreamFallbackState();
+  const seriesArtwork = resume?.entry.seriesId
+    ? series.find((item) => String(item.series_id) === resume.entry.seriesId)?.cover : undefined;
+  const detailArtwork = !detailView.classList.contains('hidden') && !detailPoster.classList.contains('hidden') ? detailPoster.src : undefined;
+  setFallbackArtwork(channel?.stream_icon || resume?.entry.poster || seriesArtwork || detailArtwork);
   playingTitle.textContent = title;
   playerMessage.textContent = 'Connecting to stream…';
   livePreviewTitle.textContent = title;
@@ -2520,6 +2719,7 @@ async function startPlayback(
   } catch (error) {
     playerMessage.textContent = describePlaybackFailure(error);
     if (display === 'preview') livePreviewMessage.textContent = playerMessage.textContent;
+    showStreamFallbackArtwork();
   }
 }
 
@@ -2594,7 +2794,9 @@ function closePlayer(stopPlayback = false): void {
   closeTrackMenu(false);
   window.clearTimeout(playerControlsHideTimer);
   playerControlsHideTimer = 0;
+  const streamFailed = playerLayer.classList.contains('stream-failed');
   playerLayer.classList.remove('controls-hidden');
+  playerLayer.classList.remove('stream-failed');
   playerLayer.classList.add('hidden');
   playerMessage.textContent = '';
   currentVodEntry = null;
@@ -2604,6 +2806,7 @@ function closePlayer(stopPlayback = false): void {
     livePreviewMessage.textContent = '';
     livePreview.appendChild(video);
     livePreview.classList.remove('hidden');
+    livePreview.classList.toggle('stream-failed', streamFailed);
     returnToLivePreviewOnPlayerClose = true;
     const selectedCard = Array.from(channelList.querySelectorAll<HTMLButtonElement>('.channel-card'))
       .find((card) => card.dataset.streamId === String(selectedChannel?.stream_id));
@@ -2613,6 +2816,8 @@ function closePlayer(stopPlayback = false): void {
     video.removeAttribute('src');
     video.load();
     moveVideoToPlayer();
+    clearStreamFallbackState();
+    setFallbackArtwork();
     livePreview.classList.add('hidden');
     selectedChannel = null;
     returnToLivePreviewOnPlayerClose = false;
@@ -2816,7 +3021,13 @@ function focusBestGeometricCandidate(active: HTMLElement, keyCode: number): bool
   const x = bounds.left + bounds.width / 2;
   const y = bounds.top + bounds.height / 2;
   const scope: ParentNode = !playerLayer.classList.contains('hidden') ? playerLayer
-    : exitConfirm.classList.contains('hidden') ? (appLayout.classList.contains('hidden') ? setupSection : appLayout) : exitConfirm;
+    : !exitConfirm.classList.contains('hidden') ? exitConfirm
+      : appLayout.classList.contains('hidden') ? setupSection
+        // The language filter is placed immediately before settingsView in the
+        // content column. Keep settings navigation inside appContent so an Up
+        // press can reach controls above the category list without selecting
+        // the sidebar as a geometric candidate.
+        : currentPage === 'settings' && !sidebar.contains(active) ? appContent : appLayout;
   const candidates = Array.from(scope.querySelectorAll<HTMLElement>('button, input, select, a[href]'))
     .filter((candidate) => candidate !== active && elementIsVisible(candidate));
   let best: HTMLElement | null = null;
@@ -2915,7 +3126,9 @@ function moveDirectionalFocus(keyCode: number): boolean {
 
 function disconnect(): void {
   closePlayer(true);
-  requestController?.abort();
+  providerLoadGeneration += 1;
+  for (const controller of requestControllers) controller.abort();
+  requestControllers.clear();
   credentials = null;
   catalogCacheKey = '';
   watchScope = activeProfileId;
@@ -3083,6 +3296,8 @@ $('save-metadata-keys').addEventListener('click', () => {
     localStorage.removeItem('nextflix.tmdb-token.v1');
     if (opensubtitlesKey) localStorage.setItem(OPENSUBTITLES_KEY, opensubtitlesKey); else localStorage.removeItem(OPENSUBTITLES_KEY);
     metadataSettingsStatus.textContent = 'API keys saved on this TV.';
+    renderHomePlaylistSettings();
+    if (currentPage === 'home') void refreshHomePlaylists();
   } catch { metadataSettingsStatus.textContent = 'TV storage could not save the API keys.'; }
 });
 $('close-player').addEventListener('click', () => closePlayer());
@@ -3129,6 +3344,7 @@ video.addEventListener('timeupdate', () => {
   saveWatchProgress();
 });
 video.addEventListener('playing', () => {
+  clearStreamFallbackState();
   playerMessage.textContent = '';
   if (video.parentElement === livePreview) livePreviewMessage.textContent = '';
   updatePlayPauseControl(true);
@@ -3145,6 +3361,7 @@ video.addEventListener('waiting', () => {
 });
 video.addEventListener('error', () => {
   const error = describePlaybackFailure();
+  showStreamFallbackArtwork();
   if (!playerLayer.classList.contains('hidden')) playerMessage.textContent = error;
   if (video.parentElement === livePreview) livePreviewMessage.textContent = error;
 });
@@ -3305,6 +3522,7 @@ try {
   tmdbKeyInput.value = tmdbApiKey;
   opensubtitlesKeyInput.value = opensubtitlesKey;
 } catch { /* Optional API keys remain unavailable when local storage is blocked. */ }
+loadHomePlaylistPreferences();
 populateLanguagePreferences();
 loadTrackPreferencesForProfile();
 
