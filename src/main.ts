@@ -269,6 +269,7 @@ const dropdownControls = new Map<HTMLSelectElement, DropdownControl>();
 let preferredSubtitleLanguages = ['nl'];
 let manualSubtitleTrack: SubtitleTrackChoice | null | 'off' = null;
 let openTrackMenu = false;
+let focusedTrackOptionIndex = 0;
 const webOsSubtitleAdapter = new WebOsMediaSubtitleAdapter();
 let episodeCountdownTimer = 0;
 let nextEpisode: SeriesEpisode | null = null;
@@ -1519,6 +1520,12 @@ function renderTrackMenu(): void {
       addOption(onlineSubtitleLoading ? 'Searching OpenSubtitles…' : 'Find subtitles on OpenSubtitles', false, () => { void findOnlineSubtitles(); });
     }
   }
+  const options = Array.from(trackOptions.querySelectorAll<HTMLButtonElement>('.track-option'));
+  if (options.length) {
+    focusedTrackOptionIndex = Math.max(0, Math.min(focusedTrackOptionIndex, options.length - 1));
+    options.forEach((option, index) => option.classList.toggle('remote-focused', index === focusedTrackOptionIndex));
+    if (openTrackMenu) options[focusedTrackOptionIndex].focus();
+  }
 }
 
 function showTrackMenu(): void {
@@ -1526,14 +1533,42 @@ function showTrackMenu(): void {
   applyPreferredTracks();
   const tracks = subtitleTracks();
   if (!tracks.length && !opensubtitlesKey) playerMessage.textContent = 'No selectable subtitles found. Add an OpenSubtitles.com API key in Settings to search online.';
+  focusedTrackOptionIndex = 0;
   openTrackMenu = true;
   renderTrackMenu();
   trackMenu.classList.remove('hidden');
   window.clearTimeout(playerControlsHideTimer);
   playerControlsHideTimer = 0;
-  trackOptions.querySelector<HTMLButtonElement>('.selected')?.focus();
   if (!tracks.length) void findOnlineSubtitles();
 }
+
+function moveTrackMenuFocus(keyCode: number): void {
+  const options = Array.from(trackOptions.querySelectorAll<HTMLButtonElement>('.track-option'));
+  if ((keyCode === 38 || keyCode === 40) && options.length) {
+    const nextIndex = focusedTrackOptionIndex + (keyCode === 40 ? 1 : -1);
+    if (nextIndex >= 0 && nextIndex < options.length) {
+      focusedTrackOptionIndex = nextIndex;
+      options.forEach((option, index) => option.classList.toggle('remote-focused', index === focusedTrackOptionIndex));
+      options[focusedTrackOptionIndex].focus();
+      return;
+    }
+  }
+
+  // Keep remote navigation predictable on webOS builds where focus events
+  // differ from the desktop browser's normal button-to-button behavior.
+  closeTrackMenu(false);
+  subtitleTracksButton.focus();
+  if (keyCode === 37 || keyCode === 39) movePlayerControlFocus(keyCode);
+}
+
+trackMenu.addEventListener('focusout', () => {
+  // Defer until webOS has completed the remote-driven focus transition.
+  // This avoids closing during menu setup, but dismisses it as soon as focus
+  // really moves to another player control.
+  window.setTimeout(() => {
+    if (openTrackMenu && !trackMenu.contains(document.activeElement)) closeTrackMenu(false);
+  }, 0);
+});
 
 function stopEpisodeCountdown(): void {
   if (episodeCountdownTimer) window.clearInterval(episodeCountdownTimer);
@@ -3508,6 +3543,13 @@ window.addEventListener('keydown', (event) => {
     event.preventDefault();
     event.stopPropagation();
     handleBackPress();
+    return;
+  }
+
+  if (openTrackMenu && isArrow) {
+    event.preventDefault();
+    event.stopPropagation();
+    moveTrackMenuFocus(keyCode);
     return;
   }
 

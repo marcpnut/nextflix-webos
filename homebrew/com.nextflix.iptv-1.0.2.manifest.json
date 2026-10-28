@@ -1,0 +1,16 @@
+{
+  "id": "com.nextflix.iptv",
+  "version": "1.0.2",
+  "type": "web",
+  "title": "NextFlix",
+  "appDescription": "A lightweight IPTV player with improved subtitle menu navigation for LG webOS remotes.",
+  "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/largeIcon.png",
+  "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
+  "rootRequired": false,
+  "ipkUrl": "https://github.com/marcpnut/nextflix-webos/releases/download/v1.0.2/com.nextflix.iptv_1.0.2_all.ipk",
+  "ipkHash": {
+    "sha256": "41976bae6011b1269e657f8c6547ed7af93e5970075a526241cb99eb0a765a55"
+  },
+  "ipkSize": 61302,
+  "installedSize": 184188
+}

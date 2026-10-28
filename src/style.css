@@ -268,6 +268,7 @@ select option { color: #fff; background: var(--surface); }
 .track-options { display: grid; gap: 6px; }
 .track-option { min-height: 48px; text-align: left; border-color: transparent; background: transparent; }
 .track-option.selected { border-color: #fff; background: #ffffff20; }
+.track-option.remote-focused, .track-option:focus { outline: 3px solid #fff; outline-offset: 1px; background: #ffffff30; }
 .next-episode-prompt { position: absolute; z-index: 11; left: 50%; bottom: 182px; display: flex; align-items: center; gap: 14px; max-width: 90vw; padding: 14px 18px; border: 1px solid #ffffff40; border-radius: 12px; background: #111319ed; transform: translateX(-50%); box-shadow: 0 12px 40px #000b; }
 .next-episode-prompt span { min-width: 190px; font-size: 18px; }
 .next-episode-prompt button { min-height: 48px; white-space: nowrap; }

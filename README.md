@@ -1,4 +1,4 @@
-# NextFlix — Version 1.0.1
+# NextFlix — Version 1.0.2
 
 Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 

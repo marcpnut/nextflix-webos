@@ -9,7 +9,7 @@
     {
       "id": "com.nextflix.iptv",
       "title": "NextFlix",
-      "manifestUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv-1.0.1.manifest.json",
+      "manifestUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv-1.0.2.manifest.json",
       "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/largeIcon.png"
     }
   ]
