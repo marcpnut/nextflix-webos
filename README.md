@@ -6,7 +6,7 @@ Lightweight IPTV player for LG webOS. The single app package targets Chromium 53
 
 | NextFlix app icon | Home | Movies | Series | Live TV | My List | Settings |
 |---|---|---|---|---|---|---|
-| ![NextFlix app icon](public/largeIcon.png) | ![Home navigation icon](public/icons/home.png) | ![Movies navigation icon](public/icons/movies.png) | ![Series navigation icon](public/icons/series.png) | ![Live TV navigation icon](public/icons/live.png) | ![My List navigation icon](public/icons/my-list.png) | ![Settings navigation icon](public/icons/settings.png) |
+| ![NextFlix app icon](public/nextflix-icon-violet.png) | ![Home navigation icon](public/icons/home.png) | ![Movies navigation icon](public/icons/movies.png) | ![Series navigation icon](public/icons/series.png) | ![Live TV navigation icon](public/icons/live.png) | ![My List navigation icon](public/icons/my-list.png) | ![Settings navigation icon](public/icons/settings.png) |
 
 ## Current scope
 
@@ -135,3 +135,4 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - [ ] Phase 7 feasibility item: local phone pairing/LAN transfer remains unavailable to ordinary packaged apps without a listener service; keep manual entry and encrypted backup as the safe alternatives.
 - [x] Phase 8 local gate: rebuild and package 1.0.0 before release.
 - [ ] Phase 8 TV gate: verify 1.0.0 player navigation, subtitle overlays, TV scroll arrows, focus visibility at all grid edges, metadata, and external subtitle behavior on the LG.
+
