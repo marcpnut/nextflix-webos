@@ -1,0 +1,16 @@
+{
+  "id": "com.nextflix.iptv",
+  "version": "1.0.7",
+  "type": "web",
+  "title": "NextFlix",
+  "appDescription": "C9 compatibility test build of the free LG webOS IPTV player. Chromium 53 uses default Xtream fetch behavior, with remote text editing fixes and redacted HTTP 511 diagnostics.",
+  "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
+  "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
+  "rootRequired": false,
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.7_all.ipk",
+  "ipkHash": {
+    "sha256": "f16f782f43ff6b9fb188f538e6dd285cdf5f35ca0527ab1b66b48f02f9a96c41"
+  },
+  "ipkSize": 64338,
+  "installedSize": 196634
+}

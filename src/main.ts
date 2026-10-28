@@ -156,7 +156,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.5';
+const APP_VERSION = '1.0.7';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -802,6 +802,34 @@ function beginInputEditing(input: HTMLInputElement): void {
   input.tabIndex = 0;
   proxy.hidden = true;
   input.focus();
+}
+
+function emitInputChanged(input: HTMLInputElement): void {
+  const changed = document.createEvent('HTMLEvents');
+  changed.initEvent('input', true, false);
+  input.dispatchEvent(changed);
+}
+
+function editInputCharacter(input: HTMLInputElement, backwards: boolean): void {
+  const length = input.value.length;
+  const start = typeof input.selectionStart === 'number' ? input.selectionStart : length;
+  const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
+  const from = start !== end ? start : backwards ? Math.max(0, start - 1) : start;
+  const to = start !== end ? end : backwards ? end : Math.min(length, end + 1);
+  if (from === to) return;
+  input.value = `${input.value.slice(0, from)}${input.value.slice(to)}`;
+  input.setSelectionRange(from, from);
+  emitInputChanged(input);
+}
+
+function moveInputCaret(input: HTMLInputElement, direction: -1 | 1): void {
+  const length = input.value.length;
+  const start = typeof input.selectionStart === 'number' ? input.selectionStart : length;
+  const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
+  const position = start !== end
+    ? direction < 0 ? start : end
+    : Math.max(0, Math.min(length, start + direction));
+  input.setSelectionRange(position, position);
 }
 
 function endInputEditing(): void {
@@ -3629,10 +3657,28 @@ window.addEventListener('keydown', (event) => {
     || (event.key === 'Backspace' && !editingInput);
 
   if (editingInput) {
+    if (event.key === 'Backspace' || keyCode === 8) {
+      event.preventDefault();
+      event.stopPropagation();
+      editInputCharacter(editingInput, true);
+      return;
+    }
+    if (event.key === 'Delete' || keyCode === 46) {
+      event.preventDefault();
+      event.stopPropagation();
+      editInputCharacter(editingInput, false);
+      return;
+    }
     if (isBack) {
       event.preventDefault();
       event.stopPropagation();
       endInputEditing();
+      return;
+    }
+    if (keyCode === 37 || keyCode === 39) {
+      event.preventDefault();
+      event.stopPropagation();
+      moveInputCaret(editingInput, keyCode === 37 ? -1 : 1);
       return;
     }
     if (isArrow) return;
