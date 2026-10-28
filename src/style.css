@@ -179,6 +179,8 @@ select option { color: #fff; background: #1c1e27; }
 .player { position: fixed; inset: 0; z-index: 10; background: #000; }
 .player video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .player-top, .player-bottom { position: absolute; left: 0; right: 0; display: flex; align-items: center; padding: 28px 48px; }
+.player-top, .player-bottom { transition: opacity .22s ease, visibility .22s ease; }
+.player.controls-hidden .player-top, .player.controls-hidden .player-bottom { opacity: 0; visibility: hidden; pointer-events: none; }
 .player-top { top: 0; gap: 24px; background: linear-gradient(#000c, transparent); }
 #playing-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 23px; font-weight: 700; text-shadow: 0 2px 8px #000; }
 .player-icon-button { display: inline-flex; flex: 0 0 58px; align-items: center; justify-content: center; width: 58px; min-width: 58px; height: 58px; min-height: 58px; padding: 10px; border: 0; border-radius: 50%; color: #fff; background: transparent; opacity: .92; transition: background-color .15s ease, transform .15s ease, opacity .15s ease; }

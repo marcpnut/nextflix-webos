@@ -142,7 +142,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.6.2';
+const APP_VERSION = '0.6.3';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -229,6 +229,7 @@ let seekHoldTimer = 0;
 let seekHoldDirection: -1 | 1 | 0 = 0;
 let seekHoldStartedAt = 0;
 let seekHoldLastSignal = 0;
+let playerControlsHideTimer = 0;
 let activeDropdown: DropdownControl | null = null;
 let focusedDropdownOption = 0;
 let editingInput: HTMLInputElement | null = null;
@@ -1167,6 +1168,56 @@ function updatePlayPauseControl(isPlaying: boolean): void {
     : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5 12 7-12 7z" /></svg>';
 }
 
+function schedulePlayerControlsHide(): void {
+  window.clearTimeout(playerControlsHideTimer);
+  playerControlsHideTimer = 0;
+  if (playerLayer.classList.contains('hidden') || video.paused) return;
+  playerControlsHideTimer = window.setTimeout(() => {
+    playerControlsHideTimer = 0;
+    if (openTrackMenu || video.paused) return;
+    const active = document.activeElement as HTMLElement | null;
+    if (active && playerLayer.contains(active) && active !== video) active.blur();
+    playerLayer.classList.add('controls-hidden');
+  }, 5000);
+}
+
+function revealPlayerControls(focusPlaybackControl = false): void {
+  window.clearTimeout(playerControlsHideTimer);
+  playerControlsHideTimer = 0;
+  playerLayer.classList.remove('controls-hidden');
+  if (focusPlaybackControl && playerLayer.contains(document.activeElement)) playPauseButton.focus();
+  schedulePlayerControlsHide();
+}
+
+function movePlayerControlFocus(keyCode: number): boolean {
+  const active = document.activeElement as HTMLElement | null;
+  if (!active || !active.closest('.player-controls')) return false;
+  if (keyCode !== 37 && keyCode !== 39) return false;
+  const controls = Array.from(playerLayer.querySelectorAll<HTMLButtonElement>('.player-controls button'))
+    .filter(elementIsVisible);
+  const index = controls.indexOf(active as HTMLButtonElement);
+  const target = controls[index + (keyCode === 39 ? 1 : -1)];
+  if (!target) return false;
+  target.focus();
+  schedulePlayerControlsHide();
+  return true;
+}
+
+function raiseHtmlSubtitleCues(): void {
+  const tracks = tracksOf(subtitleTrackList());
+  tracks.forEach((track) => {
+    const cues = (track as MediaTrack & { cues?: TextTrackCueList | null }).cues;
+    if (!cues) return;
+    for (let index = 0; index < cues.length; index += 1) {
+      const cue = cues[index] as TextTrackCue & { line?: number | 'auto'; snapToLines?: boolean };
+      try {
+        cue.snapToLines = false;
+        cue.line = 82;
+      } catch { /* Native TV-rendered tracks may not expose cue positioning. */ }
+    }
+  });
+}
+
 function updatePlaybackControls(): void {
   const live = selectedChannel !== null;
   previousChannelButton.classList.toggle('hidden', !live);
@@ -1256,8 +1307,8 @@ function observeAvailableTracks(): void {
   for (const list of lists) {
     if (observedTrackLists.has(list)) continue;
     observedTrackLists.add(list);
-    list.addEventListener?.('addtrack', applyPreferredTracks);
-    list.addEventListener?.('change', applyPreferredTracks);
+    list.addEventListener?.('addtrack', () => { applyPreferredTracks(); raiseHtmlSubtitleCues(); });
+    list.addEventListener?.('change', () => { applyPreferredTracks(); raiseHtmlSubtitleCues(); });
   }
 }
 
@@ -1265,6 +1316,7 @@ function closeTrackMenu(restoreFocus = true): void {
   openTrackMenu = false;
   trackMenu.classList.add('hidden');
   if (restoreFocus) subtitleTracksButton.focus();
+  schedulePlayerControlsHide();
 }
 
 function selectSubtitleTrack(choice: SubtitleTrackChoice, manual: boolean): void {
@@ -1279,6 +1331,7 @@ function selectSubtitleTrack(choice: SubtitleTrackChoice, manual: boolean): void
   }
   const tracks = tracksOf(subtitleTrackList()).filter((track) => !track.kind || ['subtitles', 'captions', 'forced'].includes(track.kind));
   tracks.forEach((track, index) => { try { track.mode = index === choice.index ? 'showing' : 'disabled'; } catch { /* Ignore unsupported native text-track controls. */ } });
+  raiseHtmlSubtitleCues();
 }
 
 async function findOnlineSubtitles(): Promise<void> {
@@ -1321,6 +1374,7 @@ async function addOnlineSubtitle(choice: OnlineSubtitle): Promise<void> {
     tracks.forEach((track) => { try { track.mode = 'disabled'; } catch { /* Some TV tracks are read-only. */ } });
     element.track.mode = 'showing';
     manualSubtitleTrack = { source: 'html', index: Math.max(0, tracks.length - 1), track: element.track, language: element.srclang, label: element.label };
+    raiseHtmlSubtitleCues();
     playerMessage.textContent = `Using ${choice.language} subtitles from OpenSubtitles.`;
   } catch (error) {
     if (generation === playbackGeneration) playerMessage.textContent = error instanceof Error ? error.message : 'Could not load online subtitles.';
@@ -1367,15 +1421,24 @@ function renderTrackMenu(): void {
 }
 
 function showTrackMenu(): void {
+  revealPlayerControls(false);
   applyPreferredTracks();
   const tracks = subtitleTracks();
   if (!tracks.length && !opensubtitlesKey) playerMessage.textContent = 'No selectable subtitles found. Add an OpenSubtitles.com API key in Settings to search online.';
   openTrackMenu = true;
   renderTrackMenu();
   trackMenu.classList.remove('hidden');
+  window.clearTimeout(playerControlsHideTimer);
+  playerControlsHideTimer = 0;
   trackOptions.querySelector<HTMLButtonElement>('.selected')?.focus();
   if (!tracks.length) void findOnlineSubtitles();
 }
+
+trackMenu.addEventListener('focusout', (event: FocusEvent) => {
+  const next = event.relatedTarget;
+  if (next instanceof Node && trackMenu.contains(next)) return;
+  if (openTrackMenu) closeTrackMenu(false);
+});
 
 function stopEpisodeCountdown(): void {
   if (episodeCountdownTimer) window.clearInterval(episodeCountdownTimer);
@@ -2306,6 +2369,7 @@ function showLiveChannelFullscreen(): void {
   livePreview.classList.add('hidden');
   playerLayer.classList.remove('hidden');
   returnToLivePreviewOnPlayerClose = currentPage === 'live' && catalogView === 'live' && !activeSeries;
+  revealPlayerControls(false);
   playPauseButton.focus();
 }
 
@@ -2403,6 +2467,9 @@ async function startPlayback(
   stopSeekHold();
   stopEpisodeCountdown();
   closeTrackMenu(false);
+  window.clearTimeout(playerControlsHideTimer);
+  playerControlsHideTimer = 0;
+  playerLayer.classList.remove('controls-hidden');
   webOsSubtitleAdapter.stop();
   manualSubtitleTrack = null;
   playingTitle.textContent = title;
@@ -2524,6 +2591,9 @@ function closePlayer(stopPlayback = false): void {
   stopSeekHold();
   stopEpisodeCountdown();
   closeTrackMenu(false);
+  window.clearTimeout(playerControlsHideTimer);
+  playerControlsHideTimer = 0;
+  playerLayer.classList.remove('controls-hidden');
   playerLayer.classList.add('hidden');
   playerMessage.textContent = '';
   currentVodEntry = null;
@@ -3019,6 +3089,8 @@ nextChannelButton.addEventListener('click', () => switchChannel(1));
 seekBackButton.addEventListener('click', () => seekBy(-10));
 seekForwardButton.addEventListener('click', () => seekBy(10));
 subtitleTracksButton.addEventListener('click', showTrackMenu);
+playerLayer.addEventListener('click', () => revealPlayerControls(false));
+playerLayer.addEventListener('mousemove', () => revealPlayerControls(false));
 nextEpisodePlayButton.addEventListener('click', () => {
   const episode = nextEpisode;
   stopEpisodeCountdown();
@@ -3043,6 +3115,7 @@ video.addEventListener('loadedmetadata', () => {
   observeAvailableTracks();
   webOsSubtitleAdapter.start(video, () => applyPreferredTracks());
   applyPreferredTracks();
+  raiseHtmlSubtitleCues();
   const generation = playbackGeneration;
   window.setTimeout(() => {
     if (generation === playbackGeneration && currentVodEntry && !subtitleTracks().length && opensubtitlesKey) void findOnlineSubtitles();
@@ -3165,6 +3238,12 @@ window.addEventListener('keydown', (event) => {
   }
 
   if (playerLayer.classList.contains('hidden')) return;
+  if (playerLayer.classList.contains('controls-hidden') && !openTrackMenu) {
+    revealPlayerControls(false);
+    playPauseButton.focus();
+  } else {
+    revealPlayerControls(false);
+  }
   if ([37, 38, 39, 40].includes(keyCode)) {
     if ((keyCode === 37 || keyCode === 39) && target === seekBar) {
       event.preventDefault();
@@ -3175,7 +3254,7 @@ window.addEventListener('keydown', (event) => {
     if (keyCode === 37 || keyCode === 39) {
       event.preventDefault();
       event.stopPropagation();
-      moveDirectionalFocus(keyCode);
+      if (!movePlayerControlFocus(keyCode)) moveDirectionalFocus(keyCode);
       return;
     }
     if (keyCode === 38 || keyCode === 40) {

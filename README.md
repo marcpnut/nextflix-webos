@@ -1,4 +1,4 @@
-# NextFlix — Development version 0.6.2
+# NextFlix — Development version 0.6.3
 
 Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 
@@ -122,5 +122,5 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - [x] Phase 7 storage safeguard: bound rebuildable IndexedDB snapshots to two catalogs, pruning entries older than 14 days.
 - [ ] Phase 7 TV validation: verify backup file export/import and passphrase handling, cache cleanup preserves profiles/history, diagnostics report gracefully, and the optional release check works on TV.
 - [ ] Phase 7 feasibility item: local phone pairing/LAN transfer remains unavailable to ordinary packaged apps without a listener service; keep manual entry and encrypted backup as the safe alternatives.
-- [ ] Phase 8 local gate: rebuild and package 0.6.2 before release.
-- [ ] Phase 8 TV gate: verify 0.6.2 scrolling cues, catalogue filters, player controls, metadata, and external subtitle behavior on the LG.
+- [ ] Phase 8 local gate: rebuild and package 0.6.3 before release.
+- [ ] Phase 8 TV gate: verify 0.6.3 remote player navigation, auto-hidden controls, subtitle position, metadata, and external subtitle behavior on the LG.
