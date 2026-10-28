@@ -9,8 +9,8 @@
   "rootRequired": false,
   "ipkUrl": "https://github.com/marcpnut/nextflix-webos/releases/download/v1.0.0/com.nextflix.iptv_1.0.0_all.ipk",
   "ipkHash": {
-    "sha256": "15f9a1e3e5677491709b63108e7b3be80237167e3a3e1a7eb25a95e31cca1841"
+    "sha256": "107f5f82a82919da88d457101d357a98c134fe6f3ea81607e0aac6a2bb0b86a4"
   },
-  "ipkSize": 60384,
-  "installedSize": 181171
+  "ipkSize": 60478,
+  "installedSize": 181227
 }

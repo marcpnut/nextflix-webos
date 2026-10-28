@@ -1,9 +1,9 @@
 :root {
   --app-bg: #101116;
   --surface: #1c1e27;
-  --accent: #a78bfa;
+  --accent: #b653f5;
   --accent-bright: #7859c9;
-  --accent-focus: #a78bfa;
+  --accent-focus: #b653f5;
   --card: #323541;
   --card-raised: #292c36;
   --card-selected: #323541;
@@ -26,7 +26,7 @@
 }
 
 :root[data-theme="violet"] {
-  --accent: #a78bfa; --accent-bright: #7859c9; --accent-focus: #a78bfa; --icon-filter: hue-rotate(266deg);
+  --accent: #b653f5; --accent-bright: #7840b8; --accent-focus: #b653f5; --icon-filter: hue-rotate(266deg);
 }
 :root[data-theme="emerald"] {
   --accent: #48c78e; --accent-bright: #25865e; --accent-focus: #48c78e; --icon-filter: hue-rotate(156deg);
