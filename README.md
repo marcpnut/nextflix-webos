@@ -1,4 +1,4 @@
-# NextFlix — Phase 7 and Phase 8 release candidate (0.6.0)
+# NextFlix — Phase 7 and Phase 8 release candidate (0.6.1)
 
 Minimal Xtream Codes live TV player for LG webOS TV 6.5.3 / Chromium 79.
 
@@ -81,7 +81,7 @@ The target TV is a rooted LG 55NANO886PB running webOS 6.5.3 / Pear webOS. NextF
 The `homebrew/` directory contains the Homebrew Channel catalog, app manifest, and versioned IPK for the public GitHub repository `marcpnut/nextflix-webos`. The manifest pins the GitHub Release package by SHA-256. Add this catalog URL in Homebrew Channel Settings → Repositories:
 
 ```text
-https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/repo.json
+https://marcpnut.github.io/repo
 ```
 
 The GitHub repository must be public for the TV's Homebrew Channel to download the catalog, manifest, and IPK without an account token. Build public packages with `pnpm package`, which strips the local test-provider variables and refuses packaging if their values remain in the output.
@@ -128,5 +128,5 @@ For a local-only provider test build, copy `.env.local.example` to `.env.local` 
 - [x] Phase 7 storage safeguard: bound rebuildable IndexedDB snapshots to two catalogs and two guides, pruning entries older than 14 days.
 - [ ] Phase 7 TV validation: verify backup file export/import and passphrase handling, cache cleanup preserves profiles/history, diagnostics report gracefully, and the optional release check works on TV.
 - [ ] Phase 7 feasibility item: local phone pairing/LAN transfer remains unavailable to ordinary packaged apps without a listener service; keep manual entry and encrypted backup as the safe alternatives.
-- [x] Phase 8 local gate: TypeScript and Vite build, credential-free 0.6.0 IPK packaging, and encrypted backup round-trip verification.
-- [ ] Phase 8 TV gate: follow [release checklist](RELEASE-CHECKLIST.md) on the LG before calling 0.6.0 release ready.
+- [x] Phase 8 local gate: TypeScript and Vite build, credential-free 0.6.1 IPK packaging, and encrypted backup round-trip verification.
+- [ ] Phase 8 TV gate: follow [release checklist](RELEASE-CHECKLIST.md) on the LG before calling 0.6.1 release ready.

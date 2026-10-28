@@ -16,6 +16,8 @@ import {
   type SeriesEpisode
 } from './catalogCache';
 import { decryptBackup, encryptBackup, type BackupPayload } from './backup';
+import { findTmdbMetadata } from './metadata';
+import { searchOnlineSubtitles, downloadOnlineSubtitle, type OnlineSubtitle } from './opensubtitles';
 import {
   EPG_MAX_XML_BYTES,
   EPG_REFRESH_MS,
@@ -90,6 +92,8 @@ const detailKind = $('detail-kind');
 const detailTitle = $('detail-title');
 const detailMeta = $('detail-meta');
 const detailDescription = $('detail-description');
+const detailCast = $('detail-cast');
+const detailSource = $('detail-source');
 const detailPlayButton = $('detail-play') as HTMLButtonElement;
 const detailListButton = $('detail-list') as HTMLButtonElement;
 const detailStartOverButton = $('detail-start-over') as HTMLButtonElement;
@@ -141,6 +145,9 @@ const diagnosticsSummary = $('diagnostics-summary');
 const cacheStatus = $('cache-status');
 const updateStatus = $('update-status');
 const releaseLink = $('release-link') as HTMLAnchorElement;
+const tmdbTokenInput = $('tmdb-token') as HTMLInputElement;
+const opensubtitlesKeyInput = $('opensubtitles-key') as HTMLInputElement;
+const metadataSettingsStatus = $('metadata-settings-status');
 const exitConfirm = $('exit-confirm');
 const backHint = $('back-hint');
 const video = $('video') as HTMLVideoElement;
@@ -170,7 +177,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.6.0';
+const APP_VERSION = '0.6.1';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -223,6 +230,15 @@ const WATCH_HISTORY_KEY = 'nextflix.watch-history.v1';
 const TRACK_PREFERENCES_KEY = 'nextflix.track-preferences.v1';
 const EPG_SETTINGS_KEY = 'nextflix.epg-settings.v1';
 const EPG_MAPPINGS_KEY = 'nextflix.epg-mappings.v1';
+const TMDB_TOKEN_KEY = 'nextflix.tmdb-token.v1';
+const OPENSUBTITLES_KEY = 'nextflix.opensubtitles-key.v1';
+let tmdbToken = '';
+let opensubtitlesKey = '';
+let onlineSubtitleChoices: OnlineSubtitle[] = [];
+let onlineSubtitleLoading = false;
+let externalSubtitleElement: HTMLTrackElement | null = null;
+let externalSubtitleUrl = '';
+let playbackGeneration = 0;
 const EPG_VISIBLE_CHANNELS = 5;
 const EPG_RENDER_BUFFER = 2;
 const EPG_ROW_HEIGHT = 64;
@@ -1575,6 +1591,52 @@ function selectSubtitleTrack(choice: SubtitleTrackChoice, manual: boolean): void
   tracks.forEach((track, index) => { try { track.mode = index === choice.index ? 'showing' : 'disabled'; } catch { /* Ignore unsupported native text-track controls. */ } });
 }
 
+async function findOnlineSubtitles(): Promise<void> {
+  const entry = currentVodEntry;
+  if (!entry || !opensubtitlesKey || onlineSubtitleLoading || onlineSubtitleChoices.length) return;
+  const generation = playbackGeneration;
+  onlineSubtitleLoading = true;
+  playerMessage.textContent = 'Searching OpenSubtitles for this title…';
+  try {
+    const choices = await searchOnlineSubtitles(opensubtitlesKey, entry.kind === 'series' ? entry.seriesTitle ?? entry.title : entry.title,
+      preferredSubtitleLanguages.length ? preferredSubtitleLanguages : ['nl', 'en'], entry.season, entry.episodeNumber);
+    if (generation !== playbackGeneration) return;
+    onlineSubtitleChoices = choices;
+    playerMessage.textContent = onlineSubtitleChoices.length
+      ? `${onlineSubtitleChoices.length} online subtitles found. Open Subtitles to choose one; timing may differ from this stream.`
+      : 'No online subtitle matched this title and language.';
+    if (openTrackMenu) renderTrackMenu();
+  } catch (error) {
+    if (generation === playbackGeneration) playerMessage.textContent = error instanceof Error ? error.message : 'Online subtitle search failed.';
+  } finally { onlineSubtitleLoading = false; }
+}
+
+async function addOnlineSubtitle(choice: OnlineSubtitle): Promise<void> {
+  const generation = playbackGeneration;
+  playerMessage.textContent = `Downloading ${choice.language} subtitles…`;
+  try {
+    const vtt = await downloadOnlineSubtitle(opensubtitlesKey, choice.fileId);
+    if (generation !== playbackGeneration) return;
+    if (externalSubtitleElement) externalSubtitleElement.remove();
+    if (externalSubtitleUrl) URL.revokeObjectURL(externalSubtitleUrl);
+    externalSubtitleUrl = URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' }));
+    const element = document.createElement('track');
+    element.kind = 'subtitles';
+    element.label = `OpenSubtitles · ${choice.language}`;
+    element.srclang = choice.language.split('-')[0];
+    element.src = externalSubtitleUrl;
+    video.appendChild(element);
+    externalSubtitleElement = element;
+    const tracks = tracksOf(subtitleTrackList());
+    tracks.forEach((track) => { try { track.mode = 'disabled'; } catch { /* Some TV tracks are read-only. */ } });
+    element.track.mode = 'showing';
+    manualSubtitleTrack = { source: 'html', index: Math.max(0, tracks.length - 1), track: element.track, language: element.srclang, label: element.label };
+    playerMessage.textContent = `Using ${choice.language} subtitles from OpenSubtitles.`;
+  } catch (error) {
+    if (generation === playbackGeneration) playerMessage.textContent = error instanceof Error ? error.message : 'Could not load online subtitles.';
+  }
+}
+
 function renderTrackMenu(): void {
   const tracks = subtitleTracks();
   clearChildren(trackOptions);
@@ -1603,19 +1665,26 @@ function renderTrackMenu(): void {
       : choice.source === 'html' && choice.track?.mode === 'showing');
     addOption(choice.label, selected, () => selectSubtitleTrack(choice, true));
   });
+  if (currentVodEntry && opensubtitlesKey) {
+    if (onlineSubtitleChoices.length) {
+      onlineSubtitleChoices.slice(0, 12).forEach((choice) => {
+        addOption(`${choice.language.toUpperCase()} · ${choice.release || 'Online subtitle'}`, false, () => { void addOnlineSubtitle(choice); });
+      });
+    } else {
+      addOption(onlineSubtitleLoading ? 'Searching OpenSubtitles…' : 'Find subtitles on OpenSubtitles', false, () => { void findOnlineSubtitles(); });
+    }
+  }
 }
 
 function showTrackMenu(): void {
   applyPreferredTracks();
   const tracks = subtitleTracks();
-  if (!tracks.length) {
-    playerMessage.textContent = 'No selectable subtitles were found. This TV supports external WebVTT subtitles; embedded subtitle support depends on the stream and TV media pipeline.';
-    return;
-  }
+  if (!tracks.length && !opensubtitlesKey) playerMessage.textContent = 'No selectable subtitles found. Add an OpenSubtitles.com API key in Settings to search online.';
   openTrackMenu = true;
   renderTrackMenu();
   trackMenu.classList.remove('hidden');
   trackOptions.querySelector<HTMLButtonElement>('.selected')?.focus();
+  if (!tracks.length) void findOnlineSubtitles();
 }
 
 function stopEpisodeCountdown(): void {
@@ -1787,6 +1856,31 @@ function toggleFavorite(kind: 'movie' | 'series', id: number | string): void {
   if (currentPage === 'my-list') renderMyList();
 }
 
+async function enrichDetail(kind: 'movie' | 'series', item: Movie | Series, title: string, year: string): Promise<void> {
+  if (!tmdbToken) return;
+  detailSource.textContent = 'Loading movie information…';
+  try {
+    const metadata = await findTmdbMetadata(kind, title, year, tmdbToken);
+    if (currentPage !== 'detail' || detailItem?.item !== item) return;
+    if (!metadata) {
+      detailSource.textContent = 'No confident TMDB match; showing provider information.';
+      return;
+    }
+    if (metadata.overview) detailDescription.textContent = metadata.overview;
+    if (metadata.cast) detailCast.textContent = `Cast: ${metadata.cast}`;
+    if (metadata.genres) detailMeta.textContent = [detailMeta.textContent, metadata.genres].filter(Boolean).join(' · ');
+    if (!detailPoster.getAttribute('src') && metadata.poster) {
+      detailPoster.src = metadata.poster;
+      detailPoster.classList.remove('hidden');
+    }
+    detailSource.textContent = 'Description from TMDB';
+  } catch (error) {
+    if (currentPage === 'detail' && detailItem?.item === item) {
+      detailSource.textContent = error instanceof Error ? `TMDB unavailable: ${error.message}` : 'TMDB information is unavailable.';
+    }
+  }
+}
+
 function showMovieDetails(item: Movie): void {
   if (currentPage !== 'detail') {
     previousPage = currentPage;
@@ -1797,6 +1891,8 @@ function showMovieDetails(item: Movie): void {
   detailTitle.textContent = item.name ?? 'Untitled movie';
   detailMeta.textContent = [item.year, item.rating ? `★ ${item.rating}` : ''].filter(Boolean).join(' · ');
   detailDescription.textContent = item.plot ?? 'No description supplied by the provider.';
+  detailCast.textContent = '';
+  detailSource.textContent = '';
   detailPoster.src = item.stream_icon ?? '';
   detailPoster.classList.toggle('hidden', !item.stream_icon);
   const resumeEntry = watchEntryForMovie(item.stream_id);
@@ -1805,6 +1901,7 @@ function showMovieDetails(item: Movie): void {
   detailListButton.textContent = favorites.has(favoriteKey('movie', item.stream_id)) ? 'Remove from My List' : 'Add to My List';
   showPage('detail');
   detailPlayButton.focus();
+  void enrichDetail('movie', item, item.name ?? '', String(item.year ?? ''));
 }
 
 function showSeriesDetails(item: Series): void {
@@ -1817,6 +1914,8 @@ function showSeriesDetails(item: Series): void {
   detailTitle.textContent = item.name ?? 'Untitled series';
   detailMeta.textContent = [item.releaseDate, item.genre, item.rating ? `★ ${item.rating}` : ''].filter(Boolean).join(' · ');
   detailDescription.textContent = item.plot ?? 'No description supplied by the provider.';
+  detailCast.textContent = '';
+  detailSource.textContent = '';
   detailPoster.src = item.cover ?? '';
   detailPoster.classList.toggle('hidden', !item.cover);
   detailPlayButton.textContent = 'View episodes';
@@ -1824,6 +1923,7 @@ function showSeriesDetails(item: Series): void {
   detailListButton.textContent = favorites.has(favoriteKey('series', item.series_id)) ? 'Remove from My List' : 'Add to My List';
   showPage('detail');
   detailPlayButton.focus();
+  void enrichDetail('series', item, item.name ?? '', item.releaseDate ?? '');
 }
 
 function renderPosterRow(container: HTMLElement, kind: 'movie' | 'series', items: Array<Movie | Series>): void {
@@ -2877,6 +2977,13 @@ async function startPlayback(
   resume?: { entry: WatchProgress; position: number },
   display: 'fullscreen' | 'preview' = 'fullscreen'
 ): Promise<void> {
+  playbackGeneration += 1;
+  onlineSubtitleChoices = [];
+  onlineSubtitleLoading = false;
+  if (externalSubtitleElement) externalSubtitleElement.remove();
+  externalSubtitleElement = null;
+  if (externalSubtitleUrl) URL.revokeObjectURL(externalSubtitleUrl);
+  externalSubtitleUrl = '';
   saveWatchProgress(true);
   stopSeekHold();
   stopEpisodeCountdown();
@@ -3591,6 +3698,15 @@ backupFileInput.addEventListener('change', () => {
 $('refresh-diagnostics').addEventListener('click', () => { void refreshDiagnostics(); });
 $('clear-cache').addEventListener('click', () => { void clearSavedCaches(); });
 $('check-updates').addEventListener('click', () => { void checkForAppUpdate(); });
+$('save-metadata-keys').addEventListener('click', () => {
+  tmdbToken = tmdbTokenInput.value.trim();
+  opensubtitlesKey = opensubtitlesKeyInput.value.trim();
+  try {
+    if (tmdbToken) localStorage.setItem(TMDB_TOKEN_KEY, tmdbToken); else localStorage.removeItem(TMDB_TOKEN_KEY);
+    if (opensubtitlesKey) localStorage.setItem(OPENSUBTITLES_KEY, opensubtitlesKey); else localStorage.removeItem(OPENSUBTITLES_KEY);
+    metadataSettingsStatus.textContent = 'API keys saved on this TV.';
+  } catch { metadataSettingsStatus.textContent = 'TV storage could not save the API keys.'; }
+});
 $('close-player').addEventListener('click', () => closePlayer());
 previousChannelButton.addEventListener('click', () => switchChannel(-1));
 nextChannelButton.addEventListener('click', () => switchChannel(1));
@@ -3621,6 +3737,10 @@ video.addEventListener('loadedmetadata', () => {
   observeAvailableTracks();
   webOsSubtitleAdapter.start(video, () => applyPreferredTracks());
   applyPreferredTracks();
+  const generation = playbackGeneration;
+  window.setTimeout(() => {
+    if (generation === playbackGeneration && currentVodEntry && !subtitleTracks().length && opensubtitlesKey) void findOnlineSubtitles();
+  }, 1800);
 });
 video.addEventListener('durationchange', updateSeekControls);
 video.addEventListener('timeupdate', () => {
@@ -3796,6 +3916,12 @@ try {
   sidebar.classList.toggle('collapsed', localStorage.getItem('nextflix.sidebar-collapsed.v1') === 'true');
 } catch { /* Defaults are used when local storage is unavailable. */ }
 loadWatchHistory();
+try {
+  tmdbToken = localStorage.getItem(TMDB_TOKEN_KEY) ?? '';
+  opensubtitlesKey = localStorage.getItem(OPENSUBTITLES_KEY) ?? '';
+  tmdbTokenInput.value = tmdbToken;
+  opensubtitlesKeyInput.value = opensubtitlesKey;
+} catch { /* Optional API keys remain unavailable when local storage is blocked. */ }
 populateLanguagePreferences();
 loadTrackPreferencesForProfile();
 
