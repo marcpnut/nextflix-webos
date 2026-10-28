@@ -64,6 +64,43 @@ const DATABASE = 'nextflix-catalog-cache';
 const STORE = 'catalogs';
 const EPG_STORE = 'epg';
 const DATABASE_VERSION = 2;
+const CACHE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+
+async function pruneStore(database: IDBDatabase, storeName: string, keepNewest: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(storeName, 'readwrite');
+    const store = transaction.objectStore(storeName);
+    const snapshots: { key: string; savedAt: number }[] = [];
+    const cursorRequest = store.openCursor();
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result;
+      if (cursor) {
+        const value = cursor.value as { key?: unknown; savedAt?: unknown };
+        if (typeof value.key === 'string') snapshots.push({ key: value.key, savedAt: Number(value.savedAt) || 0 });
+        cursor.continue();
+        return;
+      }
+      snapshots.sort((left, right) => right.savedAt - left.savedAt);
+      const cutoff = Date.now() - CACHE_RETENTION_MS;
+      snapshots.forEach((snapshot, index) => {
+        if (index >= keepNewest || snapshot.savedAt < cutoff) store.delete(snapshot.key);
+      });
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error ?? new Error('Could not prune old cache entries.'));
+    transaction.onabort = () => reject(transaction.error ?? new Error('Cache pruning was interrupted.'));
+  });
+}
+
+export async function pruneRebuildableCaches(): Promise<void> {
+  const database = await openDatabase();
+  try {
+    await pruneStore(database, STORE, 2);
+    await pruneStore(database, EPG_STORE, 2);
+  } finally {
+    database.close();
+  }
+}
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -137,4 +174,33 @@ export async function writeCatalog(catalog: CachedCatalog): Promise<void> {
   } finally {
     database.close();
   }
+}
+
+export async function getRebuildableCacheCounts(): Promise<{ catalogs: number; guideSnapshots: number }> {
+  const database = await openDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction([STORE, EPG_STORE], 'readonly');
+      const catalogs = transaction.objectStore(STORE).count();
+      const guideSnapshots = transaction.objectStore(EPG_STORE).count();
+      const counts = { catalogs: 0, guideSnapshots: 0 };
+      catalogs.onsuccess = () => { counts.catalogs = catalogs.result; };
+      guideSnapshots.onsuccess = () => { counts.guideSnapshots = guideSnapshots.result; };
+      transaction.oncomplete = () => resolve(counts);
+      transaction.onerror = () => reject(transaction.error ?? new Error('Could not inspect saved cache data.'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Cache inspection was interrupted.'));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+export async function clearRebuildableCaches(): Promise<void> {
+  if (!('indexedDB' in window)) throw new Error('IndexedDB is unavailable on this device.');
+  await new Promise<void>((resolve, reject) => {
+    const request = window.indexedDB.deleteDatabase(DATABASE);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error ?? new Error('Could not clear cached catalogs and guide data.'));
+    request.onblocked = () => reject(new Error('The cache is in use. Close other NextFlix tabs and try again.'));
+  });
 }

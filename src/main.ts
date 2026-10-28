@@ -5,6 +5,9 @@ import {
   writeCatalog,
   readEpgSnapshot,
   writeEpgSnapshot,
+  pruneRebuildableCaches,
+  getRebuildableCacheCounts,
+  clearRebuildableCaches,
   type CachedCatalog,
   type CatalogCategory as Category,
   type CatalogChannel as Channel,
@@ -12,6 +15,7 @@ import {
   type CatalogSeries as Series,
   type SeriesEpisode
 } from './catalogCache';
+import { decryptBackup, encryptBackup, type BackupPayload } from './backup';
 import {
   EPG_MAX_XML_BYTES,
   EPG_REFRESH_MS,
@@ -93,8 +97,9 @@ const settingsCategoryType = $('settings-category-type') as HTMLSelectElement;
 const categoryVisibilityList = $('category-visibility-list');
 const categorySelect = $('category') as HTMLSelectElement;
 const channelList = $('channel-list');
+const channelListScroll = $('channel-list-scroll');
+const appContent = document.querySelector<HTMLElement>('.app-content')!;
 const catalogTitle = $('catalog-title');
-const catalogTypeSelect = $('catalog-type') as HTMLSelectElement;
 const searchInput = $('catalog-search') as HTMLInputElement;
 const backToSeriesButton = $('back-to-series') as HTMLButtonElement;
 const moreButton = $('more-button') as HTMLButtonElement;
@@ -113,9 +118,7 @@ const epgGuideStatus = $('epg-guide-status');
 const epgPreviewTitle = $('epg-preview-title');
 const epgPreviewVideo = $('epg-preview-video');
 const epgGrid = $('epg-grid');
-const epgPagePrevious = $('epg-page-previous') as HTMLButtonElement;
-const epgPageNext = $('epg-page-next') as HTMLButtonElement;
-const epgPageIndicator = $('epg-page-indicator');
+const epgGridScroll = $('epg-grid-scroll');
 const epgProgramDetail = $('epg-program-detail');
 const epgDetailTitle = $('epg-detail-title');
 const epgDetailTime = $('epg-detail-time');
@@ -131,6 +134,13 @@ const epgMapChannelResults = $('epg-map-channel-results');
 const epgMapSourceResults = $('epg-map-source-results');
 const epgMappingStatus = $('epg-mapping-status');
 const epgClearMappingButton = $('epg-clear-mapping') as HTMLButtonElement;
+const backupPasswordInput = $('backup-password') as HTMLInputElement;
+const backupFileInput = $('backup-file') as HTMLInputElement;
+const backupStatus = $('backup-status');
+const diagnosticsSummary = $('diagnostics-summary');
+const cacheStatus = $('cache-status');
+const updateStatus = $('update-status');
+const releaseLink = $('release-link') as HTMLAnchorElement;
 const exitConfirm = $('exit-confirm');
 const backHint = $('back-hint');
 const video = $('video') as HTMLVideoElement;
@@ -160,7 +170,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '0.5.0';
+const APP_VERSION = '0.6.0';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -178,7 +188,9 @@ let epgProgramIndex = new Map<string, EpgProgram[]>();
 let manualEpgMappings: Record<string, string> = {};
 let selectedEpgMapChannel: Channel | null = null;
 let selectedEpgProgram: { channel: Channel; program?: EpgProgram } | null = null;
-let epgPage = 1;
+let epgRenderedStart = -1;
+let epgScrollLoadTimer = 0;
+let epgScrollRenderFrame = 0;
 let epgCacheKey = '';
 let epgFetchController: AbortController | null = null;
 let epgProviderFetchedChannels = new Set<string>();
@@ -211,10 +223,13 @@ const WATCH_HISTORY_KEY = 'nextflix.watch-history.v1';
 const TRACK_PREFERENCES_KEY = 'nextflix.track-preferences.v1';
 const EPG_SETTINGS_KEY = 'nextflix.epg-settings.v1';
 const EPG_MAPPINGS_KEY = 'nextflix.epg-mappings.v1';
-const EPG_CHANNELS_PER_PAGE = 5;
+const EPG_VISIBLE_CHANNELS = 5;
+const EPG_RENDER_BUFFER = 2;
+const EPG_ROW_HEIGHT = 64;
+const EPG_HEADER_HEIGHT = 46;
 const EPG_HOUR_WIDTH = 150;
 const EPG_GRID_HOURS = 4;
-const EPG_CHANNEL_FALLBACK_LIMIT = EPG_CHANNELS_PER_PAGE;
+const EPG_CHANNEL_FALLBACK_LIMIT = EPG_VISIBLE_CHANNELS;
 type MediaTrack = { language?: string; label?: string; kind?: string; enabled?: boolean; mode?: string };
 type SubtitleTrackChoice = { source: 'html' | 'webos'; index: number; track?: MediaTrack; language?: string; label: string };
 type TrackList = { length: number; [index: number]: MediaTrack; addEventListener?: (type: string, listener: EventListener) => void };
@@ -563,7 +578,7 @@ function providerXmltvUrl(): string {
 
 async function fetchProviderEpgForChannels(targetChannels: Channel[], signal?: AbortSignal): Promise<number> {
   if (!credentials || sourceType !== 'xtream') return 0;
-  const batch = targetChannels.slice(0, EPG_CHANNELS_PER_PAGE).filter((channel) => {
+  const batch = targetChannels.slice(0, EPG_VISIBLE_CHANNELS).filter((channel) => {
     const id = String(channel.stream_id);
     if (epgProgramIndex.has(id) || epgProviderFetchedChannels.has(id)) return false;
     epgProviderFetchedChannels.add(id);
@@ -580,7 +595,10 @@ async function fetchProviderEpgForChannels(targetChannels: Channel[], signal?: A
       return { channel, programs: [] as EpgProgram[] };
     }
   }));
-  if (signal?.aborted) return 0;
+  if (signal?.aborted) {
+    batch.forEach((channel) => epgProviderFetchedChannels.delete(String(channel.stream_id)));
+    return 0;
+  }
   let added = 0;
   for (const { channel, programs } of results) {
     if (!programs.length) continue;
@@ -625,7 +643,7 @@ async function refreshEpg(force: boolean, quickGuidePage = false): Promise<void>
     } catch { /* The guide can still be fetched if TV storage is unavailable. */ }
   }
   if (!force && epgCacheKey === key && epgPrograms.length) {
-    if (!epgGuide.classList.contains('hidden')) await loadProviderEpgForCurrentPage();
+    if (!epgGuide.classList.contains('hidden')) await loadProviderEpgForVisibleChannels();
     return;
   }
 
@@ -684,13 +702,12 @@ async function refreshEpg(force: boolean, quickGuidePage = false): Promise<void>
   }
 }
 
-async function loadProviderEpgForCurrentPage(): Promise<void> {
+async function loadProviderEpgForVisibleChannels(startIndex = firstVisibleEpgChannelIndex()): Promise<void> {
   if (sourceType !== 'xtream') return;
   epgFetchController?.abort();
   const controller = new AbortController();
   epgFetchController = controller;
-  const start = (epgPage - 1) * EPG_CHANNELS_PER_PAGE;
-  const pageChannels = guideChannels().slice(start, start + EPG_CHANNELS_PER_PAGE);
+  const pageChannels = guideChannels().slice(startIndex, startIndex + EPG_VISIBLE_CHANNELS);
   try {
     const added = await fetchProviderEpgForChannels(pageChannels, controller.signal);
     if (added) {
@@ -836,7 +853,9 @@ function focusDropdownTrigger(select: HTMLSelectElement): void {
 function updateInputProxy(input: HTMLInputElement): void {
   const proxy = inputProxies.get(input);
   if (!proxy) return;
-  proxy.textContent = input.value || input.placeholder || '';
+  proxy.textContent = input.type === 'password' && input.value
+    ? '•'.repeat(Math.min(input.value.length, 24))
+    : input.value || input.placeholder || '';
   proxy.classList.toggle('placeholder', !input.value && !!input.placeholder);
 }
 
@@ -926,7 +945,8 @@ function selectedLanguageView(): CatalogView {
 }
 
 function renderLanguageFilter(): void {
-  const visible = currentPage === 'settings' || currentPage === 'movies' || currentPage === 'series' || currentPage === 'live';
+  const visible = currentPage === 'settings' || currentPage === 'movies' || currentPage === 'series'
+    || currentPage === 'live' || currentPage === 'search';
   languageFilter.classList.toggle('hidden', !visible);
   if (!visible) return;
   const view = selectedLanguageView();
@@ -1243,6 +1263,184 @@ function addViewerProfile(): void {
   profiles.push(profile);
   saveProfiles();
   switchProfile(profile.id);
+}
+
+function collectSettingsBackup(): BackupPayload {
+  const values: Record<string, string> = {};
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key?.startsWith('nextflix.')) {
+      const value = localStorage.getItem(key);
+      if (value !== null) values[key] = value;
+    }
+  }
+  return { format: 'nextflix-settings', schemaVersion: 1, createdAt: new Date().toISOString(), values };
+}
+
+async function exportSettingsBackup(): Promise<void> {
+  backupStatus.textContent = 'Encrypting backup on this device…';
+  try {
+    const payload = collectSettingsBackup();
+    const blob = await encryptBackup(payload, backupPasswordInput.value);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `nextflix-backup-${new Date().toISOString().slice(0, 10)}.nextflix`;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    backupStatus.textContent = `Encrypted backup created (${Object.keys(payload.values).length} settings). Store the file and password separately.`;
+    backupPasswordInput.value = '';
+    updateInputProxy(backupPasswordInput);
+  } catch (error) {
+    backupStatus.textContent = error instanceof Error ? error.message : 'Could not create the encrypted backup.';
+  }
+}
+
+function replaceSettingsFromBackup(values: Record<string, string>): void {
+  const previous: Record<string, string> = {};
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key?.startsWith('nextflix.')) {
+      const value = localStorage.getItem(key);
+      if (value !== null) previous[key] = value;
+    }
+  }
+  const clearNextFlixSettings = (): void => {
+    const keys: string[] = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith('nextflix.')) keys.push(key);
+    }
+    keys.forEach((key) => localStorage.removeItem(key));
+  };
+  try {
+    clearNextFlixSettings();
+    Object.entries(values).forEach(([key, value]) => localStorage.setItem(key, value));
+  } catch (error) {
+    try {
+      clearNextFlixSettings();
+      Object.entries(previous).forEach(([key, value]) => localStorage.setItem(key, value));
+    } catch { /* Preserve the original storage error; rollback is best-effort if quota is exhausted. */ }
+    throw error;
+  }
+}
+
+async function restoreSettingsBackup(file: File): Promise<void> {
+  backupStatus.textContent = 'Checking and decrypting the selected backup…';
+  try {
+    const payload = await decryptBackup(file, backupPasswordInput.value);
+    const count = Object.keys(payload.values).length;
+    const created = new Date(payload.createdAt);
+    const dateLabel = Number.isNaN(created.getTime()) ? 'an unknown date' : created.toLocaleString();
+    if (!window.confirm(`Restore ${count} NextFlix settings from ${dateLabel}? This replaces the settings currently saved in NextFlix. Cached catalogs are not affected.`)) {
+      backupStatus.textContent = 'Restore cancelled. Your current settings are unchanged.';
+      return;
+    }
+    replaceSettingsFromBackup(payload.values);
+    backupStatus.textContent = 'Backup restored. NextFlix will reload to apply the saved profiles and provider settings.';
+    window.setTimeout(() => window.location.reload(), 900);
+  } catch (error) {
+    backupStatus.textContent = error instanceof Error ? error.message : 'Could not restore this backup.';
+  } finally {
+    backupFileInput.value = '';
+    backupPasswordInput.value = '';
+    updateInputProxy(backupPasswordInput);
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'unknown';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+async function refreshDiagnostics(): Promise<void> {
+  diagnosticsSummary.textContent = 'Reading local app and cache diagnostics…';
+  try {
+    const cacheCounts = await getRebuildableCacheCounts();
+    let localBytes = 0;
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index) ?? '';
+      localBytes += key.length * 2 + (localStorage.getItem(key)?.length ?? 0) * 2;
+    }
+    const storageManager = (navigator as Navigator & { storage?: { estimate?: () => Promise<{ usage?: number; quota?: number }> } }).storage;
+    let quotaText = 'not reported by this browser';
+    if (storageManager?.estimate) {
+      try {
+        const estimate = await storageManager.estimate();
+        if (typeof estimate.usage === 'number' && typeof estimate.quota === 'number') {
+          quotaText = `${formatBytes(estimate.usage)} used of ${formatBytes(estimate.quota)}`;
+        }
+      } catch { /* Storage quota reporting is optional on older webOS browsers. */ }
+    }
+    const media = document.createElement('video');
+    const report = [
+      `NextFlix ${APP_VERSION} · ${navigator.userAgent}`,
+      `Connection: ${stateLabel.textContent || (navigator.onLine ? 'Online' : 'Offline')}`,
+      `Catalog currently loaded: ${channels.length.toLocaleString()} live · ${movies.length.toLocaleString()} movies · ${series.length.toLocaleString()} series`,
+      `Rebuildable IndexedDB cache: ${cacheCounts.catalogs} catalog snapshots · ${cacheCounts.guideSnapshots} guide snapshots`,
+      `Local settings size: approximately ${formatBytes(localBytes)} · browser storage: ${quotaText}`,
+      `Playback probes: MP4/H.264 ${media.canPlayType('video/mp4; codecs="avc1.42E01E"') || 'unknown'} · HLS ${media.canPlayType('application/vnd.apple.mpegurl') || media.canPlayType('application/x-mpegURL') || 'unknown'}`
+    ];
+    diagnosticsSummary.textContent = report.join('\n');
+    cacheStatus.textContent = 'Cache cleanup removes only saved catalog and EPG snapshots. Profiles, provider login, favorites, history, and settings stay in local storage.';
+  } catch (error) {
+    diagnosticsSummary.textContent = error instanceof Error ? `Diagnostics unavailable: ${error.message}` : 'Diagnostics are unavailable on this browser.';
+  }
+}
+
+async function clearSavedCaches(): Promise<void> {
+  cacheStatus.textContent = 'Clearing rebuildable catalog and guide snapshots…';
+  try {
+    await clearRebuildableCaches();
+    cacheStatus.textContent = 'Cached catalogs and guide data cleared. Your provider login, profiles, favorites, watch history, and preferences are preserved.';
+    await refreshDiagnostics();
+  } catch (error) {
+    cacheStatus.textContent = error instanceof Error ? error.message : 'Could not clear the app cache.';
+  }
+}
+
+function compareVersions(left: string, right: string): number {
+  const parts = (value: string) => value.replace(/^v/i, '').split(/[.+-]/).slice(0, 3).map((part) => Number.parseInt(part, 10) || 0);
+  const a = parts(left);
+  const b = parts(right);
+  for (let index = 0; index < 3; index += 1) {
+    if ((a[index] ?? 0) !== (b[index] ?? 0)) return (a[index] ?? 0) - (b[index] ?? 0);
+  }
+  return 0;
+}
+
+async function checkForAppUpdate(): Promise<void> {
+  updateStatus.textContent = 'Checking public GitHub Releases…';
+  releaseLink.classList.add('hidden');
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 12_000);
+  try {
+    const response = await fetch('https://api.github.com/repos/marcpnut/nextflix-webos/releases/latest', {
+      headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store', signal: controller.signal
+    });
+    if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}.`);
+    const release = await response.json() as { tag_name?: string; html_url?: string; draft?: boolean; prerelease?: boolean };
+    if (!release.tag_name || !release.html_url || release.draft || release.prerelease) throw new Error('No public stable release was found.');
+    const latest = release.tag_name.replace(/^v/i, '');
+    if (compareVersions(latest, APP_VERSION) > 0) {
+      updateStatus.textContent = `NextFlix ${latest} is available. Download and install it manually when convenient; playback and app data are never replaced automatically.`;
+      releaseLink.href = release.html_url;
+      releaseLink.classList.remove('hidden');
+    } else {
+      updateStatus.textContent = `This app is up to date (${APP_VERSION}).`;
+    }
+  } catch (error) {
+    updateStatus.textContent = error instanceof Error && error.name === 'AbortError'
+      ? 'The release check timed out. Try again when the TV has a connection.'
+      : error instanceof Error ? `Could not check releases: ${error.message}` : 'Could not check public releases.';
+  } finally {
+    window.clearTimeout(timeout);
+  }
 }
 
 function playbackTime(seconds: number): string {
@@ -1844,14 +2042,14 @@ function showPage(page: AppPage): void {
   librarySection.classList.toggle('hidden', !showCatalogPage);
   if (page === 'movies' || page === 'series' || page === 'live') {
     catalogView = page === 'live' ? 'live' : page;
-    catalogTypeSelect.value = catalogView;
     activeSeries = null;
     seriesEpisodes = [];
   }
   if (page === 'search') {
     if (!['live', 'movies', 'series'].includes(catalogView)) catalogView = 'movies';
-    catalogTypeSelect.value = catalogView;
   }
+  placeLanguageFilter();
+  syncLiveChannelScrollMode();
   renderLanguageFilter();
   if (showCatalogPage && !leavingDetail) {
     updateCatalogHeading();
@@ -1860,6 +2058,7 @@ function showPage(page: AppPage): void {
   if (page === 'home') renderHome();
   if (page === 'settings') renderCategorySettings();
   if (page === 'settings') renderEpgMappingResults();
+  if (page === 'settings') void refreshDiagnostics();
   if (page === 'my-list') renderMyList();
   syncLivePreviewVisibility();
   const selectedNavPage = page === 'detail' ? previousPage : page;
@@ -1873,6 +2072,7 @@ function showPage(page: AppPage): void {
 }
 
 function updateCatalogHeading(): void {
+  placeLanguageFilter();
   renderLanguageFilter();
   catalogTitle.textContent = activeSeries
     ? `${activeSeries.name ?? 'Series'} · Episodes`
@@ -1888,6 +2088,7 @@ function updateCatalogHeading(): void {
   }
   const categoryControl = dropdownControls.get(categorySelect);
   if (categoryControl) syncDropdown(categoryControl);
+  syncLiveChannelScrollMode();
   syncLivePreviewVisibility();
 }
 
@@ -1906,6 +2107,25 @@ function syncLivePreviewVisibility(): void {
     selectedChannel = null;
     returnToLivePreviewOnPlayerClose = false;
   }
+}
+
+function syncLiveChannelScrollMode(): void {
+  const liveList = !librarySection.classList.contains('hidden') && catalogView === 'live' && !activeSeries;
+  appContent.classList.toggle('live-channel-layout', liveList);
+  librarySection.classList.toggle('live-channel-layout', liveList);
+}
+
+function placeLanguageFilter(): void {
+  if (currentPage === 'settings') {
+    appContent.insertBefore(languageFilter, settingsView);
+    return;
+  }
+  if (['movies', 'series', 'live', 'search'].includes(currentPage) && !librarySection.classList.contains('hidden')) {
+    const actions = librarySection.querySelector<HTMLElement>('.library-actions');
+    if (actions) actions.insertBefore(languageFilter, actions.firstChild);
+    return;
+  }
+  appContent.insertBefore(languageFilter, appContent.firstElementChild);
 }
 
 function showCatalog(cachedAt?: number): void {
@@ -1940,6 +2160,7 @@ async function saveCatalogSnapshot(key: string): Promise<void> {
       allowedFormats: allowedLiveFormats,
       liveFormat: activeLiveFormat ?? undefined
     });
+    await pruneRebuildableCaches();
   } catch {
     // Catalog caching is best-effort on TVs with restricted storage.
   }
@@ -2087,8 +2308,8 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
       playbackBase = base;
       activeLiveFormat = null;
       await writeCatalog({ key: cacheKey, savedAt: Date.now(), sourceType: 'm3u', categories, channels });
+      await pruneRebuildableCaches();
       catalogView = 'live';
-      catalogTypeSelect.value = 'live';
       showCatalog();
       libraryMessage.textContent = `${channels.length} channels loaded from M3U.`;
       libraryMessage.classList.remove('hidden', 'loading', 'error');
@@ -2184,6 +2405,7 @@ function renderChannels(append = false): void {
   }
   if (!append) {
     renderedCount = 0;
+    channelListScroll.scrollTop = 0;
     clearChildren(channelList);
   }
   const pagedCatalog = !activeSeries && (catalogView === 'movies' || catalogView === 'series');
@@ -2257,7 +2479,7 @@ function renderChannels(append = false): void {
   }
   channelList.appendChild(fragment);
   renderedCount += next.length;
-  if (!pagedCatalog) moreButton.classList.toggle('hidden', renderedCount >= items.length);
+  if (!pagedCatalog) moreButton.classList.toggle('hidden', renderedCount >= items.length || (catalogView === 'live' && !activeSeries));
   if (!items.length) {
     const empty = document.createElement('p');
     empty.className = 'muted';
@@ -2318,11 +2540,22 @@ function updateEpgNowLines(): void {
   });
 }
 
-function renderEpgGuide(): void {
+function firstVisibleEpgChannelIndex(): number {
+  return Math.max(0, Math.floor(Math.max(0, epgGridScroll.scrollTop - EPG_HEADER_HEIGHT) / EPG_ROW_HEIGHT));
+}
+
+function renderEpgGuide(force = true): void {
   const listedChannels = guideChannels();
-  const pageCount = Math.max(1, Math.ceil(listedChannels.length / EPG_CHANNELS_PER_PAGE));
-  epgPage = Math.max(1, Math.min(epgPage, pageCount));
-  const pageChannels = listedChannels.slice((epgPage - 1) * EPG_CHANNELS_PER_PAGE, epgPage * EPG_CHANNELS_PER_PAGE);
+  const firstVisible = firstVisibleEpgChannelIndex();
+  const startIndex = Math.max(0, firstVisible - EPG_RENDER_BUFFER);
+  if (!force && startIndex === epgRenderedStart) return;
+  const endIndex = Math.min(listedChannels.length, startIndex + EPG_VISIBLE_CHANNELS + EPG_RENDER_BUFFER * 2);
+  const visibleChannels = listedChannels.slice(startIndex, endIndex);
+  const savedScrollTop = epgGridScroll.scrollTop;
+  const focusedElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const focusedRow = focusedElement?.closest<HTMLElement>('.epg-grid-row');
+  const focusedChannelId = focusedRow?.dataset.channelId;
+  const focusedProgramStart = focusedElement?.dataset.programStart;
   const now = Date.now();
   const rangeStartDate = new Date(now);
   rangeStartDate.setMinutes(0, 0, 0);
@@ -2349,12 +2582,25 @@ function renderEpgGuide(): void {
   header.appendChild(hours);
   epgGrid.appendChild(header);
 
-  for (const channel of pageChannels) {
+  const addSpacer = (rows: number): void => {
+    if (rows <= 0) return;
+    const spacer = document.createElement('div');
+    spacer.className = 'epg-virtual-spacer';
+    spacer.setAttribute('aria-hidden', 'true');
+    spacer.style.height = `${rows * EPG_ROW_HEIGHT}px`;
+    epgGrid.appendChild(spacer);
+  };
+  addSpacer(startIndex);
+
+  for (const channel of visibleChannels) {
     const row = document.createElement('div');
     row.className = 'epg-grid-row';
+    row.dataset.channelId = String(channel.stream_id);
+    row.dataset.channelIndex = String(listedChannels.indexOf(channel));
     const channelButton = document.createElement('button');
     channelButton.type = 'button';
     channelButton.className = 'epg-channel-cell';
+    channelButton.dataset.channelId = String(channel.stream_id);
     channelButton.textContent = `${channel.num ? `${channel.num}. ` : ''}${channel.name ?? 'Live channel'}`;
     channelButton.setAttribute('aria-label', `Program information for ${channel.name ?? 'live channel'}`);
     channelButton.addEventListener('click', () => showEpgProgramDetails(channel, currentProgramForChannel(channel)));
@@ -2373,6 +2619,8 @@ function renderEpgGuide(): void {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = `epg-program${program.start <= now && program.end > now ? ' current' : ''}`;
+      button.dataset.channelId = String(channel.stream_id);
+      button.dataset.programStart = String(program.start);
       button.style.left = `${((start - rangeStart) / totalDuration) * 100}%`;
       button.style.width = `${Math.max(0.7, ((end - start) / totalDuration) * 100)}%`;
       button.title = `${program.title} · ${formatGuideTime(program.start)}–${formatGuideTime(program.end)}`;
@@ -2395,11 +2643,23 @@ function renderEpgGuide(): void {
     row.appendChild(track);
     epgGrid.appendChild(row);
   }
-  epgPagePrevious.disabled = epgPage <= 1;
-  epgPageNext.disabled = epgPage >= pageCount;
-  epgPageIndicator.textContent = listedChannels.length ? `Channel page ${epgPage} of ${pageCount}` : 'No channels';
+  addSpacer(listedChannels.length - endIndex);
+  epgRenderedStart = startIndex;
+  epgGridScroll.scrollTop = savedScrollTop;
+  if (focusedChannelId) {
+    const focusTarget = Array.from(epgGrid.querySelectorAll<HTMLButtonElement>('[data-channel-id]'))
+      .find((candidate) => candidate.dataset.channelId === focusedChannelId
+        && (!focusedProgramStart || candidate.dataset.programStart === focusedProgramStart));
+    if (focusTarget) focusTarget.focus({ preventScroll: true });
+    else if (focusedRow && visibleChannels.length) {
+      const firstVisibleChannel = listedChannels[Math.min(firstVisible, listedChannels.length - 1)];
+      const visibleFocus = Array.from(epgGrid.querySelectorAll<HTMLButtonElement>('.epg-channel-cell'))
+        .find((candidate) => candidate.dataset.channelId === String(firstVisibleChannel?.stream_id));
+      visibleFocus?.focus({ preventScroll: true });
+    }
+  }
   epgPreviewTitle.textContent = selectedChannel?.name ?? 'No channel selected';
-  if (!pageChannels.length) {
+  if (!listedChannels.length) {
     epgGuideStatus.textContent = 'No channels match the current Live TV filters.';
   } else if (epgPrograms.length) {
     epgGuideStatus.textContent = `${epgPrograms.length.toLocaleString()} cached programs · next 4 hours`;
@@ -2427,15 +2687,16 @@ async function openEpgGuide(preferredChannel?: Channel): Promise<void> {
   playerLayer.classList.remove('hidden');
   epgProgramDetail.classList.add('hidden');
   epgGuide.classList.remove('hidden');
-  epgPage = 1;
+  epgGridScroll.scrollTop = 0;
+  epgRenderedStart = -1;
   renderEpgGuide();
   window.clearInterval(epgClockTimer);
   epgClockTimer = window.setInterval(updateEpgNowLines, 60_000);
   (epgGrid.querySelector<HTMLButtonElement>('button.epg-channel-cell, .epg-program') ?? $('close-guide')).focus();
   if (!epgPrograms.length) epgGuideStatus.textContent = 'Loading cached or provider guide data…';
   await refreshEpg(false, true);
-  if (sourceType === 'xtream' && guideChannels().length && !guideChannels().slice((epgPage - 1) * EPG_CHANNELS_PER_PAGE, epgPage * EPG_CHANNELS_PER_PAGE).every((channel) => programsForChannel(channel).length)) {
-    await loadProviderEpgForCurrentPage();
+  if (sourceType === 'xtream' && guideChannels().length && !guideChannels().slice(0, EPG_VISIBLE_CHANNELS).every((channel) => programsForChannel(channel).length)) {
+    await loadProviderEpgForVisibleChannels(0);
     renderEpgGuide();
   }
 }
@@ -2918,7 +3179,7 @@ function libraryActionTargets(): HTMLElement[] {
     '.library-heading .dropdown-trigger, .library-heading .input-proxy, .library-heading button'
   ));
   const language = dropdownControls.get(languageSelect)?.trigger;
-  if (language && elementIsVisible(language)) actions.push(language);
+  if (language && elementIsVisible(language) && !actions.includes(language)) actions.push(language);
   return actions.filter(elementIsVisible);
 }
 
@@ -2976,7 +3237,7 @@ function focusBestGeometricCandidate(active: HTMLElement, keyCode: number): bool
   const y = bounds.top + bounds.height / 2;
   const scope: ParentNode = !playerLayer.classList.contains('hidden') ? playerLayer
     : exitConfirm.classList.contains('hidden') ? (appLayout.classList.contains('hidden') ? setupSection : appLayout) : exitConfirm;
-  const candidates = Array.from(scope.querySelectorAll<HTMLElement>('button, input, select'))
+  const candidates = Array.from(scope.querySelectorAll<HTMLElement>('button, input, select, a[href]'))
     .filter((candidate) => candidate !== active && elementIsVisible(candidate));
   let best: HTMLElement | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
@@ -2995,9 +3256,55 @@ function focusBestGeometricCandidate(active: HTMLElement, keyCode: number): bool
   return true;
 }
 
+function moveEpgDirectionalFocus(active: HTMLElement, keyCode: number): boolean {
+  const currentRow = active.closest<HTMLElement>('.epg-grid-row');
+  if (!currentRow) return focusBestGeometricCandidate(active, keyCode);
+  const currentIndex = Number(currentRow.dataset.channelIndex);
+  if (!Number.isFinite(currentIndex)) return false;
+
+  if (keyCode === 37 || keyCode === 39) {
+    const centerX = active.getBoundingClientRect().left + active.getBoundingClientRect().width / 2;
+    const options = Array.from(currentRow.querySelectorAll<HTMLButtonElement>('button')).filter((button) => button !== active);
+    const candidates = options.filter((button) => {
+      const rect = button.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      return keyCode === 37 ? x < centerX - 1 : x > centerX + 1;
+    });
+    candidates.sort((left, right) => Math.abs(left.getBoundingClientRect().left + left.getBoundingClientRect().width / 2 - centerX)
+      - Math.abs(right.getBoundingClientRect().left + right.getBoundingClientRect().width / 2 - centerX));
+    if (candidates[0]) { candidates[0].focus(); return true; }
+    const previousLeft = epgGridScroll.scrollLeft;
+    epgGridScroll.scrollLeft = Math.max(0, previousLeft + (keyCode === 37 ? -EPG_HOUR_WIDTH : EPG_HOUR_WIDTH));
+    return epgGridScroll.scrollLeft !== previousLeft;
+  }
+
+  if (keyCode === 38 || keyCode === 40) {
+    const direction = keyCode === 40 ? 1 : -1;
+    const targetIndex = currentIndex + direction;
+    const listedChannels = guideChannels();
+    if (targetIndex < 0 || targetIndex >= listedChannels.length) return false;
+    let targetRow = epgGrid.querySelector<HTMLElement>(`.epg-grid-row[data-channel-index="${targetIndex}"]`);
+    if (!targetRow) {
+      const scrollRow = Math.max(0, targetIndex - EPG_RENDER_BUFFER);
+      epgGridScroll.scrollTop = EPG_HEADER_HEIGHT + scrollRow * EPG_ROW_HEIGHT;
+      renderEpgGuide();
+      targetRow = epgGrid.querySelector<HTMLElement>(`.epg-grid-row[data-channel-index="${targetIndex}"]`);
+    }
+    if (!targetRow) return false;
+    const centerX = active.getBoundingClientRect().left + active.getBoundingClientRect().width / 2;
+    const target = Array.from(targetRow.querySelectorAll<HTMLButtonElement>('button')).sort((left, right) =>
+      Math.abs(left.getBoundingClientRect().left + left.getBoundingClientRect().width / 2 - centerX)
+      - Math.abs(right.getBoundingClientRect().left + right.getBoundingClientRect().width / 2 - centerX))[0];
+    target?.focus();
+    return !!target;
+  }
+  return false;
+}
+
 function moveDirectionalFocus(keyCode: number): boolean {
   const active = document.activeElement as HTMLElement | null;
   if (!active || editingInput === active || active.isContentEditable || active.tagName === 'TEXTAREA') return false;
+  if (!epgGuide.classList.contains('hidden') && epgGuide.contains(active)) return moveEpgDirectionalFocus(active, keyCode);
   const rows = visibleContentRows();
   const rowIndex = rows.findIndex((row) => row.includes(active as HTMLButtonElement));
   if (rowIndex >= 0) {
@@ -3042,6 +3349,16 @@ function moveDirectionalFocus(keyCode: number): boolean {
         else return false;
         return true;
       }
+      if (catalogView === 'live' && !activeSeries && renderedCount < visibleChannels.length) {
+        const centerX = active.getBoundingClientRect().left + active.getBoundingClientRect().width / 2;
+        renderChannels(true);
+        const extendedRows = visibleContentRows();
+        const nextRow = extendedRows[rowIndex + 1];
+        const target = nextRow?.slice().sort((left, right) =>
+          Math.abs(left.getBoundingClientRect().left + left.getBoundingClientRect().width / 2 - centerX)
+          - Math.abs(right.getBoundingClientRect().left + right.getBoundingClientRect().width / 2 - centerX))[0];
+        if (target) { target.focus(); return true; }
+      }
       if (!moreButton.classList.contains('hidden')) { moreButton.focus(); return true; }
       return false;
     }
@@ -3082,7 +3399,6 @@ function disconnect(): void {
   seriesEpisodes = [];
   activeSeries = null;
   catalogView = 'live';
-  catalogTypeSelect.value = 'live';
   searchInput.value = '';
   catalogPages = { movies: 1, series: 1 };
   visibleChannels = [];
@@ -3116,15 +3432,6 @@ form.addEventListener('submit', (event) => {
 });
 saveProviderButton.addEventListener('click', saveCurrentProvider);
 providerTypeSelect.addEventListener('change', updateSourceTypeControls);
-catalogTypeSelect.addEventListener('change', () => {
-  catalogView = catalogTypeSelect.value as CatalogView;
-  activeSeries = null;
-  seriesEpisodes = [];
-  searchInput.value = '';
-  updateInputProxy(searchInput);
-  updateCatalogHeading();
-  renderChannels();
-});
 searchInput.addEventListener('input', () => {
   window.clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => {
@@ -3144,6 +3451,11 @@ backToSeriesButton.addEventListener('click', () => {
   renderChannels();
 });
 moreButton.addEventListener('click', () => renderChannels(true));
+channelListScroll.addEventListener('scroll', () => {
+  if (catalogView !== 'live' || activeSeries || (currentPage !== 'live' && currentPage !== 'search')) return;
+  const remaining = channelListScroll.scrollHeight - channelListScroll.scrollTop - channelListScroll.clientHeight;
+  if (remaining < 320 && renderedCount < visibleChannels.length) renderChannels(true);
+});
 previousPageButton.addEventListener('click', () => {
   if (catalogView !== 'movies' && catalogView !== 'series') return;
   catalogPages[catalogView] = Math.max(1, catalogPages[catalogView] - 1);
@@ -3159,19 +3471,17 @@ nextPageButton.addEventListener('click', () => {
 openGuideButton.addEventListener('click', () => { void openEpgGuide(visibleChannels[0]); });
 playerGuideButton.addEventListener('click', () => { void openEpgGuide(); });
 $('close-guide').addEventListener('click', closeEpgGuide);
-epgPagePrevious.addEventListener('click', () => {
-  epgPage = Math.max(1, epgPage - 1);
-  epgProgramDetail.classList.add('hidden');
-  renderEpgGuide();
-  void loadProviderEpgForCurrentPage();
-  epgGrid.querySelector<HTMLButtonElement>('button.epg-channel-cell, .epg-program')?.focus();
-});
-epgPageNext.addEventListener('click', () => {
-  epgPage += 1;
-  epgProgramDetail.classList.add('hidden');
-  renderEpgGuide();
-  void loadProviderEpgForCurrentPage();
-  epgGrid.querySelector<HTMLButtonElement>('button.epg-channel-cell, .epg-program')?.focus();
+  epgGridScroll.addEventListener('scroll', () => {
+  if (epgGuide.classList.contains('hidden')) return;
+  if (epgScrollRenderFrame) window.cancelAnimationFrame(epgScrollRenderFrame);
+  epgScrollRenderFrame = window.requestAnimationFrame(() => {
+    epgScrollRenderFrame = 0;
+    renderEpgGuide(false);
+  });
+  window.clearTimeout(epgScrollLoadTimer);
+  epgScrollLoadTimer = window.setTimeout(() => {
+    void loadProviderEpgForVisibleChannels();
+  }, 180);
 });
 epgWatchLiveButton.addEventListener('click', () => { void playEpgProgramLive(); });
 epgReplayButton.addEventListener('click', () => { void replayEpgProgram(); });
@@ -3272,6 +3582,15 @@ $('hide-all-categories').addEventListener('click', () => {
   renderHome();
 });
 $('disconnect-button').addEventListener('click', disconnect);
+$('export-backup').addEventListener('click', () => { void exportSettingsBackup(); });
+$('choose-backup').addEventListener('click', () => backupFileInput.click());
+backupFileInput.addEventListener('change', () => {
+  const file = backupFileInput.files?.[0];
+  if (file) void restoreSettingsBackup(file);
+});
+$('refresh-diagnostics').addEventListener('click', () => { void refreshDiagnostics(); });
+$('clear-cache').addEventListener('click', () => { void clearSavedCaches(); });
+$('check-updates').addEventListener('click', () => { void checkForAppUpdate(); });
 $('close-player').addEventListener('click', () => closePlayer());
 previousChannelButton.addEventListener('click', () => switchChannel(-1));
 nextChannelButton.addEventListener('click', () => switchChannel(1));
@@ -3415,7 +3734,9 @@ window.addEventListener('keydown', (event) => {
     if (target === searchProxy && (event.keyCode === 37 || event.keyCode === 39)) {
       event.preventDefault();
       event.stopPropagation();
-      focusDropdownTrigger(event.keyCode === 39 ? categorySelect : catalogTypeSelect);
+      if (event.keyCode === 39) focusDropdownTrigger(categorySelect);
+      else if (!languageFilter.classList.contains('hidden')) focusDropdownTrigger(languageSelect);
+      else focusActiveSidebarItem();
       return;
     }
     event.preventDefault();

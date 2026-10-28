@@ -98,6 +98,29 @@
                   <div class="epg-settings-actions"><button id="epg-clear-mapping" class="quiet" disabled>Clear selected mapping</button><span id="epg-mapping-status" role="status">Select a live channel and an XMLTV channel to map them.</span></div>
                 </div>
               </section>
+              <section class="maintenance-settings" aria-labelledby="backup-settings-title">
+                <h2 id="backup-settings-title">Backup and restore</h2>
+                <p class="muted">Export your NextFlix settings in an encrypted file. The file includes saved provider credentials, profiles, favorites, category visibility, guide mappings, and watch history. Keep the password safe; it cannot be recovered.</p>
+                <label>Backup password<input id="backup-password" type="password" minlength="8" autocomplete="new-password" placeholder="At least 8 characters" /></label>
+                <div class="settings-actions">
+                  <button id="export-backup" class="primary">Export encrypted backup</button>
+                  <button id="choose-backup">Choose backup to restore</button>
+                  <input id="backup-file" type="file" accept=".nextflix,.json,application/json" hidden />
+                </div>
+                <p id="backup-status" class="maintenance-status" role="status" aria-live="polite">Backups exclude cached artwork and rebuildable catalog/guide data.</p>
+              </section>
+              <section class="maintenance-settings" aria-labelledby="diagnostics-title">
+                <h2 id="diagnostics-title">Diagnostics and cache</h2>
+                <p id="diagnostics-summary" class="maintenance-status" role="status">Select Refresh diagnostics to inspect this app’s local capabilities and cache.</p>
+                <div class="settings-actions">
+                  <button id="refresh-diagnostics">Refresh diagnostics</button>
+                  <button id="clear-cache" class="quiet">Clear cached catalog and guide data</button>
+                  <button id="check-updates">Check for app updates</button>
+                </div>
+                <p id="cache-status" class="maintenance-status" role="status" aria-live="polite"></p>
+                <p id="update-status" class="maintenance-status" role="status" aria-live="polite"></p>
+                <a id="release-link" class="release-link hidden" target="_blank" rel="noopener noreferrer">Open release page</a>
+              </section>
               <section class="settings-account"><h2>Provider</h2><button id="disconnect-button" class="quiet">Disconnect</button></section>
             </section>
 
@@ -113,7 +136,6 @@
               <h1 id="catalog-title">Live TV</h1>
             </div>
             <div class="library-actions">
-              <label class="filter-label">Browse<select id="catalog-type"><option value="live">Live TV</option><option value="movies">Movies</option><option value="series">Series</option></select></label>
               <label class="search-label">Search<input id="catalog-search" type="search" placeholder="Search titles" autocomplete="off" /></label>
               <label class="filter-label">Category<select id="category"><option value="all">All categories</option></select></label>
               <button id="open-guide" class="quiet hidden">TV Guide</button>
@@ -121,13 +143,15 @@
             </div>
           </div>
           <div id="library-message" class="message hidden" role="status" aria-live="polite"></div>
-          <div id="channel-list" class="channel-list" role="list"></div>
+          <div id="channel-list-scroll" class="channel-list-scroll">
+            <div id="channel-list" class="channel-list" role="list"></div>
+            <button id="more-button" class="more-button hidden">Load more channels</button>
+          </div>
           <div id="catalog-pagination" class="catalog-pagination hidden" aria-label="Catalogue pages">
             <button id="page-previous" class="quiet" aria-label="Previous page">Previous</button>
             <span id="page-indicator" aria-live="polite"></span>
             <button id="page-next" class="quiet" aria-label="Next page">Next</button>
           </div>
-          <button id="more-button" class="more-button hidden">Load more channels</button>
             </section>
           </div>
         </div>
@@ -163,7 +187,6 @@
             <button id="close-guide" class="player-icon-button player-back" aria-label="Close guide" title="Close guide"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg></button>
           </header>
           <div id="epg-grid-scroll" class="epg-grid-scroll"><div id="epg-grid" class="epg-grid"></div></div>
-          <div class="epg-channel-pages"><button id="epg-page-previous" class="quiet" aria-label="Previous guide channels">Previous channels</button><span id="epg-page-indicator"></span><button id="epg-page-next" class="quiet" aria-label="Next guide channels">Next channels</button></div>
           <section id="epg-program-detail" class="epg-program-detail hidden" aria-label="Program information">
             <div><strong id="epg-detail-title"></strong><span id="epg-detail-time"></span><p id="epg-detail-description"></p></div>
             <div class="epg-detail-actions"><button id="epg-watch-live" class="primary">Watch live</button><button id="epg-replay" class="quiet hidden">Replay</button></div>

@@ -1,0 +1,16 @@
+{
+  "id": "com.nextflix.iptv",
+  "version": "0.6.0",
+  "type": "web",
+  "title": "NextFlix",
+  "appDescription": "A lightweight IPTV player with profiles, live guide, and encrypted settings backups.",
+  "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/largeIcon.png",
+  "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
+  "rootRequired": false,
+  "ipkUrl": "https://github.com/marcpnut/nextflix-webos/releases/download/v0.6.0/com.nextflix.iptv_0.6.0_all.ipk",
+  "ipkHash": {
+    "sha256": "17a64682fb7c7172681715696f7d4bba15cf477c1cb2a9502173beb2331c626c"
+  },
+  "ipkSize": 57650,
+  "installedSize": 176975
+}
