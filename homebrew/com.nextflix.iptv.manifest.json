@@ -1,16 +1,16 @@
 {
   "id": "com.nextflix.iptv",
-  "version": "1.0.14",
+  "version": "1.0.15",
   "type": "web",
   "title": "NextFlix",
-  "appDescription": "C9 login keyboard and durable credential storage fixes.",
+  "appDescription": "Restore native webOS login keyboard controls and URL field type.",
   "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
   "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
   "rootRequired": false,
-  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.14_all.ipk",
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.15_all.ipk",
   "ipkHash": {
-    "sha256": "10c201ad145737702e2efedb413e8e0fb7f3c8ecbdd529f65bbb433a8ca3109f"
+    "sha256": "f17602ce3dea300379fbc99c03771a0c48d558d575d82ff5f66cd07a3b8afaed"
   },
-  "ipkSize": 67928,
+  "ipkSize": 68018,
   "installedSize": 205432
 }

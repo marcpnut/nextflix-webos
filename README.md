@@ -1,4 +1,4 @@
-# NextFlix — Version 1.0.14
+# NextFlix — Version 1.0.15
 
 Lightweight IPTV player for LG webOS. The single app package targets Chromium 53 for older webOS 4.x TVs and remains compatible with newer webOS releases.
 

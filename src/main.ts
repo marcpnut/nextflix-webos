@@ -158,7 +158,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.14';
+const APP_VERSION = '1.0.15';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -996,6 +996,13 @@ function moveInputCaret(input: HTMLInputElement, direction: -1 | 1): void {
     ? direction < 0 ? start : end
     : Math.max(0, Math.min(length, start + direction));
   try { input.setSelectionRange(position, position); } catch { /* Keep key handling local even without caret APIs. */ }
+}
+
+function nativeWebOsKeyboardOwnsInput(): boolean {
+  return document.documentElement.classList.contains('webos-tv')
+    && !!editingInput
+    && !editingInput.hidden
+    && document.activeElement === editingInput;
 }
 
 function endInputEditing(): void {
@@ -3876,6 +3883,18 @@ window.addEventListener('keydown', (event) => {
   const isBack = event.keyCode === 461 || event.keyCode === 10009 || keyName === 'escape'
     || keyName === 'browserback' || keyName === 'goback' || (keyName === 'backspace' && !editingInput);
 
+  if (editingInput && nativeWebOsKeyboardOwnsInput()) {
+    // On webOS the native virtual keyboard handles its own arrow navigation,
+    // Backspace and text entry. Intercepting those keys here breaks the OSK.
+    if (isBack && keyCode !== 8) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      endInputEditing();
+    }
+    return;
+  }
+
   if (editingInput) {
     if (isInputBackspace) {
       event.preventDefault();
@@ -4031,7 +4050,7 @@ window.addEventListener('keydown', (event) => {
 }, true);
 
 window.addEventListener('keyup', (event) => {
-  if (editingInput) {
+  if (editingInput && !nativeWebOsKeyboardOwnsInput()) {
     const keyName = (event.key || '').toLowerCase();
     const isTextControlKey = [37, 38, 39, 40, 8, 46].includes(event.keyCode)
       || ['arrowleft', 'arrowup', 'arrowright', 'arrowdown', 'left', 'up', 'right', 'down', 'backspace', 'delete'].includes(keyName)
