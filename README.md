@@ -1,6 +1,8 @@
-# NextFlix — Version 1.0.4
+# NextFlix — Version 1.0.5
 
 Lightweight IPTV player for LG webOS. The single app package targets Chromium 53 for older webOS 4.x TVs and remains compatible with newer webOS releases.
+
+This diagnostic build reports redacted response details when an Xtream login receives HTTP 511. Credentials and full authenticated URLs are never included in diagnostic output.
 
 ## App artwork preview
 

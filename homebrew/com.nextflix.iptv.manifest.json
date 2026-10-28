@@ -1,17 +1,16 @@
 {
   "id": "com.nextflix.iptv",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "type": "web",
   "title": "NextFlix",
-  "appDescription": "Free LG webOS IPTV player for Xtream and M3U live TV, movies, and series, with remote navigation, local profiles, TMDB metadata, and optional subtitles.",
+  "appDescription": "Diagnostic build of the free LG webOS IPTV player for Xtream and M3U live TV, movies, and series. Redacted HTTP 511 login diagnostics; no credentials are logged.",
   "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
   "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
   "rootRequired": false,
-  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.4_all.ipk",
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.5_all.ipk",
   "ipkHash": {
-    "sha256": "ca21a23e6dd84f5869a4da0c36f438844923f5284a04c79d45a6ecb4fee68a08"
+    "sha256": "414c6de724ac0accd80a5659ff69f690c3fd18a9610d798418b0693a95998284"
   },
-  "ipkSize": 63076,
-  "installedSize": 192268
+  "ipkSize": 63910,
+  "installedSize": 195439
 }
-

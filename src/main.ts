@@ -156,7 +156,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.4';
+const APP_VERSION = '1.0.5';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -392,6 +392,66 @@ function normalizedBase(value: string): string {
   return parsed.toString().replace(/\/+$/, '');
 }
 
+function safeOrigin(value: string): string {
+  try { return new URL(value).origin; } catch { return '[unavailable]'; }
+}
+
+function sanitized511Body(body: string): string {
+  const username = credentials?.username ?? '';
+  const password = credentials?.password ?? '';
+  let safe = body.slice(0, 1200);
+  for (const secret of [username, password]) {
+    if (!secret) continue;
+    for (const variant of [secret, encodeURIComponent(secret)]) {
+      if (variant) safe = safe.split(variant).join('[redacted]');
+    }
+  }
+  return safe
+    .replace(/https?:\/\/[^\s"'<>]+/gi, (value) => safeOrigin(value))
+    .replace(/\b(password|passwd|token|access_token|authorization|cookie|session|username)\b(["']?\s*[:=]\s*["']?)[^"'&\s<>,]+/gi, '$1$2[redacted]')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, 320);
+}
+
+async function describe511(response: Response, requestBase: string): Promise<string> {
+  const names = ['content-type', 'server', 'via', 'location', 'www-authenticate', 'x-cache', 'x-squid-error', 'cf-ray', 'x-request-id'];
+  const headers: Record<string, string> = {};
+  for (const name of names) {
+    const value = response.headers.get(name);
+    if (!value) continue;
+    if (name === 'www-authenticate') {
+      headers[name] = '[present; value omitted]';
+      continue;
+    }
+    if (name === 'location') {
+      try { headers[name] = safeOrigin(new URL(value, response.url || requestBase).toString()); }
+      catch { headers[name] = '[unavailable]'; }
+      continue;
+    }
+    headers[name] = value.replace(/[\r\n\t]+/g, ' ').slice(0, 160);
+  }
+  let body = '';
+  try { body = sanitized511Body(await response.clone().text()); } catch { body = '[response body unavailable to this app]'; }
+  const diagnostic = {
+    appVersion: APP_VERSION,
+    method: 'GET',
+    requestHost: safeOrigin(requestBase),
+    responseHost: safeOrigin(response.url || requestBase),
+    status: response.status,
+    redirected: response.redirected,
+    responseType: response.type,
+    requestAccept: 'application/json',
+    browserUserAgent: navigator.userAgent.slice(0, 200),
+    accessibleResponseHeaders: headers,
+    sanitizedBody: body || '[empty]'
+  };
+  console.warn('[NextFlix] Redacted Xtream HTTP 511 diagnostic', diagnostic);
+  return `HTTP 511 diagnostic · App ${diagnostic.appVersion} · Browser ${diagnostic.browserUserAgent} · Request host ${diagnostic.requestHost} · Response host ${diagnostic.responseHost} · Redirected ${diagnostic.redirected ? 'yes' : 'no'} · Content-Type ${headers['content-type'] ?? 'unavailable'} · Server ${headers.server ?? 'unavailable'} · Via ${headers.via ?? 'unavailable'} · Response: ${body || '[empty]'}`;
+}
+
 async function api<T>(action?: string, extra: Record<string, string> = {}, timeoutMs = 60_000): Promise<T> {
   if (!credentials) throw new Error('Connect to a provider first.');
   const controller = createAbortController();
@@ -406,12 +466,15 @@ async function api<T>(action?: string, extra: Record<string, string> = {}, timeo
       cache: 'no-store',
       signal: controller.signal
     });
-    if (!response.ok) throw new Error(`Provider returned HTTP ${response.status}.`);
+    if (!response.ok) {
+      if (response.status === 511) throw new Error(await describe511(response, credentials.base));
+      throw new Error(`Provider returned HTTP ${response.status}.`);
+    }
     const body: unknown = await response.json();
     if (body === null || typeof body !== 'object') throw new Error('Provider returned an unexpected response.');
     return body as T;
   } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Provider returned')) throw error;
+    if (error instanceof Error && (error.message.startsWith('Provider returned') || error.message.startsWith('HTTP 511 diagnostic'))) throw error;
     if (controller.signal.aborted) throw new Error('The provider request timed out.');
     throw new Error('Could not reach the provider. Check the URL, network, TLS, and browser CORS support.');
   } finally {
