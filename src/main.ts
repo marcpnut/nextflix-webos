@@ -19,6 +19,7 @@ import { decryptBackup, encryptBackup, type BackupPayload } from './backup';
 import { clearTmdbMetadataCache, fetchTmdbHomePlaylist, findTmdbMetadata, normalizeTmdbTitle, TMDB_HOME_PLAYLISTS, type TmdbHomeEntry, type TmdbHomePlaylist } from './metadata';
 import { searchOnlineSubtitles, downloadOnlineSubtitle, type OnlineSubtitle } from './opensubtitles';
 import { WebOsMediaSubtitleAdapter, type WebOsSubtitleTrack } from './platform/webos-media';
+import { readProviderRecord, removeProviderRecord, writeProviderRecord } from './providerStorage';
 if ('PalmSystem' in window) document.documentElement.classList.add('webos-tv');
 
 type XtreamAuth = {
@@ -157,7 +158,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.13';
+const APP_VERSION = '1.0.14';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -354,42 +355,63 @@ function setBusy(busy: boolean): void {
   stateLabel.classList.toggle('loading', busy);
 }
 
+function parseSavedProvider(value: unknown): SavedProvider | null {
+  if (!value || typeof value !== 'object') return null;
+  const saved = value as Partial<SavedProvider>;
+  if (typeof saved.base !== 'string' || typeof saved.username !== 'string' || typeof saved.password !== 'string') return null;
+  return {
+    base: saved.base,
+    username: saved.username,
+    password: saved.password,
+    format: saved.format === 'm3u8' || saved.format === 'auto' ? saved.format : 'ts',
+    kind: saved.kind === 'm3u' ? 'm3u' : 'xtream'
+  };
+}
+
 function readSavedProvider(): SavedProvider | null {
   try {
     const raw = localStorage.getItem(REMEMBERED_PROVIDER_KEY);
     if (!raw) return null;
-    const saved = JSON.parse(raw) as Partial<SavedProvider>;
-    if (typeof saved.base !== 'string' || typeof saved.username !== 'string' || typeof saved.password !== 'string') return null;
-    return {
-      base: saved.base,
-      username: saved.username,
-      password: saved.password,
-      format: saved.format === 'm3u8' || saved.format === 'auto' ? saved.format : 'ts',
-      kind: saved.kind === 'm3u' ? 'm3u' : 'xtream'
-    };
+    return parseSavedProvider(JSON.parse(raw));
   } catch {
     return null;
   }
 }
 
-function saveProvider(saved: SavedProvider): boolean {
+async function readSavedProviderDurable(): Promise<SavedProvider | null> {
   try {
-    const serialized = JSON.stringify(saved);
-    localStorage.setItem(REMEMBERED_PROVIDER_KEY, serialized);
-    return localStorage.getItem(REMEMBERED_PROVIDER_KEY) === serialized;
-  } catch {
-    return false;
-  }
+    const saved = parseSavedProvider(await readProviderRecord());
+    if (saved) {
+      try { localStorage.setItem(REMEMBERED_PROVIDER_KEY, JSON.stringify(saved)); } catch { /* IndexedDB remains the durable copy. */ }
+      return saved;
+    }
+  } catch { /* Fall back to the legacy localStorage copy. */ }
+  return readSavedProvider();
 }
 
-function saveCurrentProvider(): boolean {
+async function saveProvider(saved: SavedProvider): Promise<boolean> {
+  const serialized = JSON.stringify(saved);
+  let localSaved = false;
+  try {
+    localStorage.setItem(REMEMBERED_PROVIDER_KEY, serialized);
+    localSaved = localStorage.getItem(REMEMBERED_PROVIDER_KEY) === serialized;
+  } catch { /* Try the separate IndexedDB store used by the C9 catalog cache. */ }
+  let indexedDbSaved = false;
+  try {
+    await writeProviderRecord(saved);
+    indexedDbSaved = true;
+  } catch { /* A confirmed localStorage write can still be used. */ }
+  return localSaved || indexedDbSaved;
+}
+
+async function saveCurrentProvider(): Promise<boolean> {
   try {
     const base = normalizedBase(serverInput.value);
     const username = usernameInput.value.trim();
     const password = passwordInput.value;
     if (providerTypeSelect.value === 'xtream' && (!username || !password)) throw new Error('Enter the URL, username, and password before saving.');
     const saved = { base, username, password, format: formatInput.value as LiveFormat, kind: providerTypeSelect.value === 'm3u' ? 'm3u' as const : 'xtream' as const };
-    if (!saveProvider(saved)) throw new Error('TV storage did not confirm the saved login.');
+    if (!await saveProvider(saved)) throw new Error('TV storage could not save the login. Check available storage and try again.');
     rememberProviderInput.checked = true;
     setMessage('Login saved on this TV.');
     return true;
@@ -410,8 +432,9 @@ function updateSourceTypeControls(): void {
   serverInput.placeholder = playlist ? 'https://provider.example/playlist.m3u' : 'https://provider.example:8080';
 }
 
-function forgetProvider(): void {
+async function forgetProvider(): Promise<void> {
   try { localStorage.removeItem(REMEMBERED_PROVIDER_KEY); } catch { /* Storage may be unavailable on some TV builds. */ }
+  try { await removeProviderRecord(); } catch { /* The localStorage copy is still removed. */ }
 }
 
 function normalizedBase(value: string): string {
@@ -2699,11 +2722,11 @@ async function loadProvider(options: { startup?: boolean } = {}): Promise<void> 
     // Persist before network access so a failed/slow provider request cannot
     // discard what the user entered. The opt-out removes any older saved login.
     if (rememberProviderInput.checked) {
-      if (!saveProvider({ base, username, password, format: formatInput.value as LiveFormat, kind: sourceType })) {
+      if (!await saveProvider({ base, username, password, format: formatInput.value as LiveFormat, kind: sourceType })) {
         throw new Error('TV storage could not save the login. Uncheck “Remember this login” to connect without saving.');
       }
     } else {
-      forgetProvider();
+      await forgetProvider();
     }
 
     if (sourceType === 'm3u') {
@@ -3579,7 +3602,7 @@ function moveDirectionalFocus(keyCode: number): boolean {
     || (keyCode === 37 && !sidebar.contains(active) ? focusClosestSidebarItem(active) : false);
 }
 
-function disconnect(): void {
+async function disconnect(): Promise<void> {
   closePlayer(true);
   providerLoadGeneration += 1;
   for (const controller of requestControllers) controller.abort();
@@ -3609,7 +3632,9 @@ function disconnect(): void {
   appLayout.classList.add('hidden');
   setupSection.classList.remove('hidden');
   stateLabel.textContent = 'Not connected';
-  const saved = rememberProviderInput.checked ? readSavedProvider() : null;
+  let saved = rememberProviderInput.checked ? readSavedProvider() : null;
+  if (rememberProviderInput.checked && !saved) saved = await readSavedProviderDurable();
+  if (!rememberProviderInput.checked) void forgetProvider();
   serverInput.value = saved?.base ?? '';
   usernameInput.value = saved?.username ?? '';
   passwordInput.value = saved?.password ?? '';
@@ -3629,7 +3654,7 @@ form.addEventListener('submit', (event) => {
   event.preventDefault();
   void loadProvider();
 });
-saveProviderButton.addEventListener('click', saveCurrentProvider);
+saveProviderButton.addEventListener('click', () => { void saveCurrentProvider(); });
 providerTypeSelect.addEventListener('change', updateSourceTypeControls);
 searchInput.addEventListener('input', () => {
   window.clearTimeout(searchTimer);
@@ -3735,7 +3760,7 @@ $('hide-all-categories').addEventListener('click', () => {
   renderChannels();
   renderHome();
 });
-$('disconnect-button').addEventListener('click', disconnect);
+$('disconnect-button').addEventListener('click', () => { void disconnect(); });
 $('export-backup').addEventListener('click', () => { void exportSettingsBackup(); });
 $('choose-backup').addEventListener('click', () => backupFileInput.click());
 backupFileInput.addEventListener('change', () => {
@@ -4075,6 +4100,26 @@ if (localProvider.base && localProvider.username && localProvider.password) {
 setupDropdowns();
 setupInputProxies();
 installScrollCues();
+
+if (!localProvider.base || !localProvider.username || !localProvider.password) {
+  if (!savedProvider) {
+    void readSavedProviderDurable().then((saved) => {
+      if (!saved || serverInput.value || usernameInput.value || passwordInput.value) return;
+      rememberProviderInput.checked = true;
+      serverInput.value = saved.base;
+      usernameInput.value = saved.username;
+      passwordInput.value = saved.password;
+      formatInput.value = saved.format;
+      providerTypeSelect.value = saved.kind ?? 'xtream';
+      updateSourceTypeControls();
+      updateInputProxy(serverInput);
+      updateInputProxy(usernameInput);
+      updateInputProxy(passwordInput);
+      setMessage('Reconnecting with the login saved on this TV…');
+      window.setTimeout(() => { void loadProvider({ startup: true }); }, 300);
+    });
+  }
+}
 
 if (screenLoadingDemo) {
   window.setTimeout(() => {

@@ -1,16 +1,16 @@
 {
   "id": "com.nextflix.iptv",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "type": "web",
   "title": "NextFlix",
-  "appDescription": "LG C9 login keyboard compatibility improvement.",
+  "appDescription": "C9 login keyboard and durable credential storage fixes.",
   "iconUri": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/public/nextflix-icon-violet.png",
   "sourceUrl": "https://github.com/marcpnut/nextflix-webos",
   "rootRequired": false,
-  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.13_all.ipk",
+  "ipkUrl": "https://raw.githubusercontent.com/marcpnut/nextflix-webos/main/homebrew/com.nextflix.iptv_1.0.14_all.ipk",
   "ipkHash": {
-    "sha256": "02cc52f2999e5ccd85b744881ea00091f42e3613323a578d713b54c883a854a5"
+    "sha256": "10c201ad145737702e2efedb413e8e0fb7f3c8ecbdd529f65bbb433a8ca3109f"
   },
-  "ipkSize": 67588,
+  "ipkSize": 67928,
   "installedSize": 205432
 }
