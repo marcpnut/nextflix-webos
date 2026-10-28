@@ -1,8 +1,8 @@
-# NextFlix — Version 1.0.20
+# NextFlix — Version 1.0.21
 
 Lightweight IPTV player for LG webOS. The single app package targets Chromium 53 for older webOS 4.x TVs and remains compatible with newer webOS releases.
 
-On webOS Chromium 53, Xtream requests use a bundled app-owned JavaScript service so the browser's packaged-app Origin header does not cause provider login failures. Startup shows loading progress until live, movie, and series catalogs are ready; fresh cached startup remains immediate. Keyboard editing captures Backspace and arrows before remote navigation. Player controls schedule their five-second hide on playback start and resume, and remain visible while paused. Other browsers keep the direct fetch path. The service uses ordinary HTTP/HTTPS, does not disable TLS verification, and never logs credentials or complete authenticated URLs. Large provider responses are transferred to the app in bounded chunks.
+On webOS Chromium 53, Xtream requests use a bundled app-owned JavaScript service so the browser's packaged-app Origin header does not cause provider login failures. Startup shows loading progress until live, movie, and series catalogs are ready; fresh cached startup remains immediate. Text fields use native browser/webOS input behavior without app-level key interception. Player controls schedule their five-second hide on playback start and resume, and remain visible while paused. Other browsers keep the direct fetch path. The service uses ordinary HTTP/HTTPS, does not disable TLS verification, and never logs credentials or complete authenticated URLs. Large provider responses are transferred to the app in bounded chunks.
 
 ## App artwork preview
 

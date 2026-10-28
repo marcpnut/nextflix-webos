@@ -19,7 +19,7 @@ import { decryptBackup, encryptBackup, type BackupPayload } from './backup';
 import { clearTmdbMetadataCache, fetchTmdbHomePlaylist, findTmdbMetadata, normalizeTmdbTitle, TMDB_HOME_PLAYLISTS, type TmdbHomeEntry, type TmdbHomePlaylist } from './metadata';
 import { searchOnlineSubtitles, downloadOnlineSubtitle, type OnlineSubtitle } from './opensubtitles';
 import { WebOsMediaSubtitleAdapter, type WebOsSubtitleTrack } from './platform/webos-media';
-import { readProviderRecord, removeProviderRecord, writeProviderRecord } from './providerStorage';
+import { readAppSetting, readProviderRecord, removeAppSetting, removeProviderRecord, writeAppSetting, writeProviderRecord } from './providerStorage';
 if ('PalmSystem' in window) document.documentElement.classList.add('webos-tv');
 
 type XtreamAuth = {
@@ -158,7 +158,7 @@ const PAGE_SIZE = 20;
 const LIVE_BATCH_SIZE = 72;
 const CATALOG_REFRESH_MS = 24 * 60 * 60 * 1000;
 const REMEMBERED_PROVIDER_KEY = 'nextflix.xtream.provider.v1';
-const APP_VERSION = '1.0.20';
+const APP_VERSION = '1.0.21';
 const versionLabel = $('app-version');
 versionLabel.textContent = `NextFlix ${APP_VERSION}`;
 type SavedProvider = { base: string; username: string; password: string; format: LiveFormat; kind?: 'xtream' | 'm3u' };
@@ -252,6 +252,7 @@ let watchHistory: WatchProgress[] = [];
 let currentVodEntry: WatchProgress | null = null;
 let lastProgressWrite = 0;
 let searchTimer = 0;
+let providerDraftSaveTimer = 0;
 let sourceType: 'xtream' | 'm3u' = 'xtream';
 let visibleChannels: Channel[] = [];
 let renderedCount = 0;
@@ -277,8 +278,6 @@ let playerControlsHideTimer = 0;
 let playerPlaybackActive = false;
 let activeDropdown: DropdownControl | null = null;
 let focusedDropdownOption = 0;
-let editingInput: HTMLInputElement | null = null;
-const inputProxies = new Map<HTMLInputElement, HTMLButtonElement>();
 const dropdownControls = new Map<HTMLSelectElement, DropdownControl>();
 let preferredSubtitleLanguages = ['nl'];
 let manualSubtitleTrack: SubtitleTrackChoice | null | 'off' = null;
@@ -399,7 +398,13 @@ async function saveProvider(saved: SavedProvider): Promise<boolean> {
   let indexedDbSaved = false;
   try {
     await writeProviderRecord(saved);
-    indexedDbSaved = true;
+    const stored = parseSavedProvider(await readProviderRecord());
+    indexedDbSaved = !!stored
+      && stored.base === saved.base
+      && stored.username === saved.username
+      && stored.password === saved.password
+      && stored.format === saved.format
+      && stored.kind === saved.kind;
   } catch { /* A confirmed localStorage write can still be used. */ }
   return localSaved || indexedDbSaved;
 }
@@ -421,13 +426,34 @@ async function saveCurrentProvider(): Promise<boolean> {
   }
 }
 
+function scheduleProviderDraftSave(): void {
+  window.clearTimeout(providerDraftSaveTimer);
+  if (!rememberProviderInput.checked) return;
+  providerDraftSaveTimer = window.setTimeout(() => {
+    const username = usernameInput.value.trim();
+    const password = passwordInput.value;
+    if (providerTypeSelect.value === 'xtream' && (!username || !password)) return;
+    let base: string;
+    try { base = normalizedBase(serverInput.value); } catch { return; }
+    void saveProvider({
+      base,
+      username,
+      password,
+      format: formatInput.value as LiveFormat,
+      kind: providerTypeSelect.value === 'm3u' ? 'm3u' : 'xtream'
+    }).then((saved) => {
+      if (!saved && !form.hasAttribute('aria-busy')) setMessage('Could not save this login on the TV. Check TV app storage.', true);
+    });
+  }, 650);
+}
+
 function updateSourceTypeControls(): void {
   const playlist = providerTypeSelect.value === 'm3u';
   credentialFields.classList.toggle('hidden', playlist);
-  // Hidden native inputs must not trigger browser validation/focus; loadProvider
-  // performs the same checks explicitly before making a request.
-  usernameInput.required = !playlist && !inputProxies.has(usernameInput);
-  passwordInput.required = !playlist && !inputProxies.has(passwordInput);
+  // Keep native credential fields validated when Xtream is selected. The
+  // playlist mode hides them and validates its own URL when connecting.
+  usernameInput.required = !playlist;
+  passwordInput.required = !playlist;
   serverLabel.textContent = playlist ? 'M3U playlist URL' : 'Server URL';
   serverInput.placeholder = playlist ? 'https://provider.example/playlist.m3u' : 'https://provider.example:8080';
 }
@@ -940,113 +966,6 @@ document.addEventListener('click', (event) => {
   }
 });
 
-function updateInputProxy(input: HTMLInputElement): void {
-  const proxy = inputProxies.get(input);
-  if (!proxy) return;
-  proxy.textContent = input.type === 'password' && input.value
-    ? '•'.repeat(Math.min(input.value.length, 24))
-    : input.value || input.placeholder || '';
-  proxy.classList.toggle('placeholder', !input.value && !!input.placeholder);
-}
-
-function focusInputProxy(input: HTMLInputElement): void {
-  inputProxies.get(input)?.focus();
-}
-
-function beginInputEditing(input: HTMLInputElement): void {
-  if (editingInput) endInputEditing();
-  const proxy = inputProxies.get(input);
-  if (!proxy) return;
-  editingInput = input;
-  input.hidden = false;
-  input.readOnly = false;
-  input.tabIndex = 0;
-  proxy.hidden = true;
-  // Focus synchronously inside the remote-OK/click gesture. webOS uses this
-  // user activation to open its native keyboard; deferring it can lose that.
-  input.focus();
-  try {
-    const end = input.value.length;
-    input.setSelectionRange(end, end);
-  } catch { /* Keep focus even if the platform does not expose caret APIs. */ }
-}
-
-function emitInputChanged(input: HTMLInputElement): void {
-  const changed = document.createEvent('HTMLEvents');
-  changed.initEvent('input', true, false);
-  input.dispatchEvent(changed);
-}
-
-function editInputCharacter(input: HTMLInputElement, backwards: boolean): void {
-  const length = input.value.length;
-  const start = typeof input.selectionStart === 'number' ? input.selectionStart : length;
-  const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
-  const from = start !== end ? start : backwards ? Math.max(0, start - 1) : start;
-  const to = start !== end ? end : backwards ? end : Math.min(length, end + 1);
-  if (from === to) return;
-  input.value = `${input.value.slice(0, from)}${input.value.slice(to)}`;
-  try { input.setSelectionRange(from, from); } catch { /* Some TV IMEs do not expose caret APIs. */ }
-  emitInputChanged(input);
-}
-
-function moveInputCaret(input: HTMLInputElement, direction: -1 | 1): void {
-  const length = input.value.length;
-  const start = typeof input.selectionStart === 'number' ? input.selectionStart : length;
-  const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : start;
-  const position = start !== end
-    ? direction < 0 ? start : end
-    : Math.max(0, Math.min(length, start + direction));
-  try { input.setSelectionRange(position, position); } catch { /* Keep key handling local even without caret APIs. */ }
-}
-
-function nativeWebOsKeyboardOwnsInput(): boolean {
-  return document.documentElement.classList.contains('webos-tv')
-    && !!editingInput
-    && !editingInput.hidden;
-}
-
-function endInputEditing(): void {
-  if (!editingInput) return;
-  const input = editingInput;
-  const proxy = inputProxies.get(input);
-  updateInputProxy(input);
-  editingInput = null;
-  input.blur();
-  input.readOnly = true;
-  input.tabIndex = -1;
-  input.hidden = true;
-  if (proxy) {
-    proxy.hidden = false;
-    proxy.focus();
-  }
-}
-
-function setupInputProxies(): void {
-  document.querySelectorAll<HTMLInputElement>(
-    'input:not([type]), input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="color"]):not([type="image"]):not([type="hidden"])'
-  )
-    .forEach((input) => {
-      const proxy = document.createElement('button');
-      proxy.type = 'button';
-      proxy.className = 'input-proxy';
-      const labelText = input.closest('label')?.textContent?.replace(input.value, '').trim();
-      proxy.setAttribute('aria-label', labelText || input.placeholder || 'Text field');
-      input.parentElement?.insertBefore(proxy, input);
-      input.hidden = true;
-      input.readOnly = true;
-      input.tabIndex = -1;
-      input.required = false;
-      inputProxies.set(input, proxy);
-      updateInputProxy(input);
-      input.addEventListener('focus', () => {
-        if (!input.hidden && !input.readOnly) editingInput = input;
-      });
-      input.addEventListener('input', () => updateInputProxy(input));
-      input.addEventListener('change', () => updateInputProxy(input));
-      proxy.addEventListener('click', () => beginInputEditing(input));
-    });
-}
-
 function categoriesFor(view: CatalogView): Category[] {
   if (view === 'movies') return movieCategories;
   if (view === 'series') return seriesCategories;
@@ -1300,7 +1219,6 @@ function openProfilesDialog(): void {
   renderProfileOptions();
   profileMessage.textContent = '';
   profileNameInput.value = '';
-  updateInputProxy(profileNameInput);
   profileDialog.classList.remove('hidden');
   profileList.querySelector<HTMLButtonElement>('.profile-option.active')?.focus();
 }
@@ -1336,7 +1254,7 @@ function addViewerProfile(): void {
   const name = profileNameInput.value.trim().replace(/\s+/g, ' ').slice(0, 24);
   if (!name) {
     profileMessage.textContent = 'Enter a name for the new profile.';
-    focusInputProxy(profileNameInput);
+    profileNameInput.focus();
     return;
   }
   if (profiles.length >= 8) {
@@ -1345,7 +1263,7 @@ function addViewerProfile(): void {
   }
   if (profiles.some((profile) => profile.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
     profileMessage.textContent = 'A profile with that name already exists.';
-    focusInputProxy(profileNameInput);
+    profileNameInput.focus();
     return;
   }
   const profile = { id: `viewer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, name };
@@ -1382,7 +1300,6 @@ async function exportSettingsBackup(): Promise<void> {
     window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
     backupStatus.textContent = `Encrypted backup created (${Object.keys(payload.values).length} settings). Store the file and password separately.`;
     backupPasswordInput.value = '';
-    updateInputProxy(backupPasswordInput);
   } catch (error) {
     backupStatus.textContent = error instanceof Error ? error.message : 'Could not create the encrypted backup.';
   }
@@ -1436,7 +1353,6 @@ async function restoreSettingsBackup(file: File): Promise<void> {
   } finally {
     backupFileInput.value = '';
     backupPasswordInput.value = '';
-    updateInputProxy(backupPasswordInput);
   }
 }
 
@@ -3428,7 +3344,7 @@ function focusSelectedLanguage(): boolean {
 
 function libraryActionTargets(): HTMLElement[] {
   const actions = Array.from(librarySection.querySelectorAll<HTMLElement>(
-    '.library-heading .dropdown-trigger, .library-heading .input-proxy, .library-heading button'
+    '.library-heading .dropdown-trigger, .library-heading input, .library-heading button'
   ));
   const language = dropdownControls.get(languageSelect)?.trigger;
   if (language && elementIsVisible(language) && !actions.includes(language)) actions.push(language);
@@ -3524,7 +3440,7 @@ function focusBestGeometricCandidate(active: HTMLElement, keyCode: number): bool
 
 function moveDirectionalFocus(keyCode: number): boolean {
   const active = document.activeElement as HTMLElement | null;
-  if (!active || editingInput === active || active.isContentEditable || active.tagName === 'TEXTAREA') return false;
+  if (!active || active.isContentEditable || active.tagName === 'TEXTAREA' || active instanceof HTMLInputElement) return false;
   const settingsNav = sidebar.querySelector<HTMLButtonElement>('.nav-button[data-page="settings"]');
   if (active === settingsNav && keyCode === 40) {
     profileSwitchButton.focus();
@@ -3651,10 +3567,7 @@ async function disconnect(): Promise<void> {
   }
   updateSourceTypeControls();
   setMessage(saved ? 'Disconnected. Your saved login remains on this TV.' : 'Disconnected. Session credentials were cleared.');
-  updateInputProxy(serverInput);
-  updateInputProxy(usernameInput);
-  updateInputProxy(passwordInput);
-  focusInputProxy(serverInput);
+  serverInput.focus();
 }
 
 form.addEventListener('submit', (event) => {
@@ -3663,6 +3576,14 @@ form.addEventListener('submit', (event) => {
 });
 saveProviderButton.addEventListener('click', () => { void saveCurrentProvider(); });
 providerTypeSelect.addEventListener('change', updateSourceTypeControls);
+[serverInput, usernameInput, passwordInput].forEach((input) => {
+  input.addEventListener('input', scheduleProviderDraftSave);
+  input.addEventListener('change', scheduleProviderDraftSave);
+});
+rememberProviderInput.addEventListener('change', () => {
+  if (rememberProviderInput.checked) scheduleProviderDraftSave();
+  else void forgetProvider();
+});
 searchInput.addEventListener('input', () => {
   window.clearTimeout(searchTimer);
   searchTimer = window.setTimeout(() => {
@@ -3777,18 +3698,42 @@ backupFileInput.addEventListener('change', () => {
 $('refresh-diagnostics').addEventListener('click', () => { void refreshDiagnostics(); });
 $('clear-cache').addEventListener('click', () => { void clearSavedCaches(); });
 $('check-updates').addEventListener('click', () => { void checkForAppUpdate(); });
-$('save-metadata-keys').addEventListener('click', () => {
+async function saveMetadataApiKeys(): Promise<void> {
   tmdbApiKey = tmdbKeyInput.value.trim();
   opensubtitlesKey = opensubtitlesKeyInput.value.trim();
+  metadataSettingsStatus.textContent = 'Saving API keys on this TV…';
+
+  let saved = false;
   try {
     localStorage.removeItem(LEGACY_OMDB_API_KEY);
-    if (tmdbApiKey) localStorage.setItem(TMDB_API_KEY, tmdbApiKey); else localStorage.removeItem(TMDB_API_KEY);
     localStorage.removeItem('nextflix.tmdb-token.v1');
-    if (opensubtitlesKey) localStorage.setItem(OPENSUBTITLES_KEY, opensubtitlesKey); else localStorage.removeItem(OPENSUBTITLES_KEY);
-    metadataSettingsStatus.textContent = 'API keys saved on this TV.';
-    renderHomePlaylistSettings();
-    if (currentPage === 'home') void refreshHomePlaylists();
-  } catch { metadataSettingsStatus.textContent = 'TV storage could not save the API keys.'; }
+    if (tmdbApiKey) localStorage.setItem(TMDB_API_KEY, tmdbApiKey);
+    else localStorage.removeItem(TMDB_API_KEY);
+    if (opensubtitlesKey) localStorage.setItem(OPENSUBTITLES_KEY, opensubtitlesKey);
+    else localStorage.removeItem(OPENSUBTITLES_KEY);
+    saved = true;
+  } catch { /* IndexedDB below is an independent persistent fallback. */ }
+
+  try {
+    if (tmdbApiKey || opensubtitlesKey) {
+      await writeAppSetting('metadata-api-keys', { tmdb: tmdbApiKey, opensubtitles: opensubtitlesKey });
+    } else {
+      await removeAppSetting('metadata-api-keys');
+    }
+    saved = true;
+  } catch { /* Keep a successful localStorage save if IndexedDB is unavailable. */ }
+
+  if (!saved) {
+    metadataSettingsStatus.textContent = 'TV storage could not save the API keys. Check available app storage and try again.';
+    return;
+  }
+  metadataSettingsStatus.textContent = 'API keys saved on this TV.';
+  renderHomePlaylistSettings();
+  if (currentPage === 'home') void refreshHomePlaylists();
+}
+
+$('save-metadata-keys').addEventListener('click', () => {
+  void saveMetadataApiKeys();
 });
 $('close-player').addEventListener('click', () => closePlayer());
 previousChannelButton.addEventListener('click', () => switchChannel(-1));
@@ -3872,57 +3817,18 @@ video.addEventListener('error', () => {
 
 window.addEventListener('keydown', (event) => {
   const target = document.activeElement as HTMLElement | null;
+  // Do not translate, prevent, or redirect keys while a native text field is
+  // focused. The webOS/browser input method must own caret, Backspace, and arrows.
+  if ((target instanceof HTMLInputElement && !['button', 'submit', 'reset', 'checkbox', 'radio', 'range', 'file', 'color', 'image', 'hidden'].includes(target.type))
+    || target instanceof HTMLTextAreaElement || target?.isContentEditable) return;
   const keyName = (event.key || '').toLowerCase();
   const keyCode = keyName === 'arrowleft' || keyName === 'left' ? 37 : keyName === 'arrowup' || keyName === 'up' ? 38
     : keyName === 'arrowright' || keyName === 'right' ? 39 : keyName === 'arrowdown' || keyName === 'down' ? 40
       : keyName === 'backspace' ? 8 : keyName === 'delete' || keyName === 'del' ? 46 : event.keyCode;
   const isArrow = [37, 38, 39, 40].includes(keyCode);
-  const isInputBackspace = !!editingInput && (keyName === 'backspace' || event.code === 'Backspace' || keyCode === 8);
-  const isInputDelete = !!editingInput && (keyName === 'delete' || keyName === 'del' || event.code === 'Delete' || keyCode === 46);
   const isOK = event.keyCode === 13 || event.keyCode === 23 || event.key === 'Enter' || event.key === ' ';
   const isBack = event.keyCode === 461 || event.keyCode === 10009 || keyName === 'escape'
-    || keyName === 'browserback' || keyName === 'goback' || (keyName === 'backspace' && !editingInput);
-
-  if (editingInput && nativeWebOsKeyboardOwnsInput()) {
-    // Let the native webOS keyboard receive all of its own keys unmodified.
-    return;
-  }
-
-  if (editingInput) {
-    if (isInputBackspace) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      editInputCharacter(editingInput, true);
-      return;
-    }
-    if (isInputDelete) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      editInputCharacter(editingInput, false);
-      return;
-    }
-    if (isBack) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      endInputEditing();
-      return;
-    }
-    if (isArrow) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      if (keyCode === 37 || keyCode === 39) {
-        moveInputCaret(editingInput, keyCode === 37 ? -1 : 1);
-      } else {
-        try { editingInput.setSelectionRange(keyCode === 38 ? 0 : editingInput.value.length, keyCode === 38 ? 0 : editingInput.value.length); }
-        catch { editingInput.focus(); }
-      }
-      return;
-    }
-  }
+    || keyName === 'browserback' || keyName === 'goback' || keyName === 'backspace';
 
   if (activeDropdown) {
     if (isBack) {
@@ -3970,18 +3876,6 @@ window.addEventListener('keydown', (event) => {
   }
 
   if (isOK && target) {
-    const proxyInput = Array.from(inputProxies.entries()).find(([, proxy]) => proxy === target)?.[0];
-    if (proxyInput) {
-      if (document.documentElement.classList.contains('webos-tv')) {
-        // Let webOS perform the native button click. The proxy's click handler
-        // then focuses the real input during that trusted activation gesture.
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      beginInputEditing(proxyInput);
-      return;
-    }
     const dropdown = Array.from(dropdownControls.values()).find((control) => control.trigger === target);
     if (dropdown) {
       event.preventDefault();
@@ -3992,15 +3886,6 @@ window.addEventListener('keydown', (event) => {
   }
 
   if (isArrow && playerLayer.classList.contains('hidden')) {
-    const searchProxy = inputProxies.get(searchInput);
-    if (target === searchProxy && (keyCode === 37 || keyCode === 39)) {
-      event.preventDefault();
-      event.stopPropagation();
-      if (keyCode === 39) focusDropdownTrigger(categorySelect);
-      else if (!languageFilter.classList.contains('hidden')) focusDropdownTrigger(languageSelect);
-      else focusClosestSidebarItem(searchProxy);
-      return;
-    }
     event.preventDefault();
     event.stopPropagation();
     moveDirectionalFocus(keyCode);
@@ -4048,18 +3933,6 @@ window.addEventListener('keydown', (event) => {
 }, true);
 
 window.addEventListener('keyup', (event) => {
-  if (editingInput && !nativeWebOsKeyboardOwnsInput()) {
-    const keyName = (event.key || '').toLowerCase();
-    const isTextControlKey = [37, 38, 39, 40, 8, 46].includes(event.keyCode)
-      || ['arrowleft', 'arrowup', 'arrowright', 'arrowdown', 'left', 'up', 'right', 'down', 'backspace', 'delete'].includes(keyName)
-      || event.code === 'Backspace' || event.code === 'Delete';
-    if (isTextControlKey) {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      return;
-    }
-  }
   if (event.keyCode === 37 || event.keyCode === 39 || event.key === 'ArrowLeft' || event.key === 'ArrowRight') stopSeekHold();
 }, true);
 
@@ -4085,12 +3958,21 @@ try {
   tmdbKeyInput.value = tmdbApiKey;
   opensubtitlesKeyInput.value = opensubtitlesKey;
 } catch { /* Optional API keys remain unavailable when local storage is blocked. */ }
+void readAppSetting('metadata-api-keys').then((saved) => {
+  if (!saved || typeof saved !== 'object') return;
+  const record = saved as { tmdb?: unknown; opensubtitles?: unknown };
+  if (!tmdbApiKey && typeof record.tmdb === 'string') tmdbApiKey = record.tmdb;
+  if (!opensubtitlesKey && typeof record.opensubtitles === 'string') opensubtitlesKey = record.opensubtitles;
+  tmdbKeyInput.value = tmdbApiKey;
+  opensubtitlesKeyInput.value = opensubtitlesKey;
+  renderHomePlaylistSettings();
+  if (currentPage === 'home' && tmdbApiKey) void refreshHomePlaylists();
+}).catch(() => { /* API keys are optional when TV storage is unavailable. */ });
 loadHomePlaylistPreferences();
 loadAppTheme();
 populateLanguagePreferences();
 loadTrackPreferencesForProfile();
 
-const savedProvider = readSavedProvider();
 const localProvider = {
   base: (import.meta.env.VITE_XTREAM_URL ?? '').trim(),
   username: (import.meta.env.VITE_XTREAM_USERNAME ?? '').trim(),
@@ -4102,40 +3984,24 @@ if (localProvider.base && localProvider.username && localProvider.password) {
   passwordInput.value = localProvider.password;
   setMessage('Using local test-provider settings embedded in this build.');
   window.setTimeout(() => { void loadProvider({ startup: true }); }, 300);
-} else if (savedProvider) {
-  rememberProviderInput.checked = true;
-  serverInput.value = savedProvider.base;
-  usernameInput.value = savedProvider.username;
-  passwordInput.value = savedProvider.password;
-  formatInput.value = savedProvider.format;
-  providerTypeSelect.value = savedProvider.kind ?? 'xtream';
-  updateSourceTypeControls();
-  setMessage('Reconnecting with the login saved on this TV…');
-  window.setTimeout(() => { void loadProvider({ startup: true }); }, 300);
 }
 
 setupDropdowns();
-setupInputProxies();
 installScrollCues();
 
 if (!localProvider.base || !localProvider.username || !localProvider.password) {
-  if (!savedProvider) {
-    void readSavedProviderDurable().then((saved) => {
-      if (!saved || serverInput.value || usernameInput.value || passwordInput.value) return;
-      rememberProviderInput.checked = true;
-      serverInput.value = saved.base;
-      usernameInput.value = saved.username;
-      passwordInput.value = saved.password;
-      formatInput.value = saved.format;
-      providerTypeSelect.value = saved.kind ?? 'xtream';
-      updateSourceTypeControls();
-      updateInputProxy(serverInput);
-      updateInputProxy(usernameInput);
-      updateInputProxy(passwordInput);
-      setMessage('Reconnecting with the login saved on this TV…');
-      window.setTimeout(() => { void loadProvider({ startup: true }); }, 300);
-    });
-  }
+  void readSavedProviderDurable().then((saved) => {
+    if (!saved || serverInput.value || usernameInput.value || passwordInput.value) return;
+    rememberProviderInput.checked = true;
+    serverInput.value = saved.base;
+    usernameInput.value = saved.username;
+    passwordInput.value = saved.password;
+    formatInput.value = saved.format;
+    providerTypeSelect.value = saved.kind ?? 'xtream';
+    updateSourceTypeControls();
+    setMessage('Reconnecting with the login saved on this TV…');
+    window.setTimeout(() => { void loadProvider({ startup: true }); }, 300);
+  }).catch(() => { /* Stay on setup when persistent TV storage is unavailable. */ });
 }
 
 if (screenLoadingDemo) {

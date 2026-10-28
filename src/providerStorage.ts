@@ -3,6 +3,49 @@ const STORE = 'settings';
 const VERSION = 1;
 const PROVIDER_KEY = 'xtream-provider';
 
+async function readSetting(key: string): Promise<unknown | null> {
+  const database = await openDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const request = database.transaction(STORE, 'readonly').objectStore(STORE).get(key);
+      request.onsuccess = () => resolve(request.result ?? null);
+      request.onerror = () => reject(request.error ?? new Error('Could not read the saved TV setting.'));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+async function writeSetting(key: string, value: unknown): Promise<void> {
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE, 'readwrite');
+      transaction.objectStore(STORE).put(value, key);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('Could not save the TV setting.'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Saving the TV setting was interrupted.'));
+    });
+  } finally {
+    database.close();
+  }
+}
+
+async function removeSetting(key: string): Promise<void> {
+  const database = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORE, 'readwrite');
+      transaction.objectStore(STORE).delete(key);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error ?? new Error('Could not remove the TV setting.'));
+      transaction.onabort = () => reject(transaction.error ?? new Error('Removing the TV setting was interrupted.'));
+    });
+  } finally {
+    database.close();
+  }
+}
+
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (!window.indexedDB) {
@@ -20,44 +63,25 @@ function openDatabase(): Promise<IDBDatabase> {
 }
 
 export async function readProviderRecord(): Promise<unknown | null> {
-  const database = await openDatabase();
-  try {
-    return await new Promise((resolve, reject) => {
-      const request = database.transaction(STORE, 'readonly').objectStore(STORE).get(PROVIDER_KEY);
-      request.onsuccess = () => resolve(request.result ?? null);
-      request.onerror = () => reject(request.error ?? new Error('Could not read the saved TV login.'));
-    });
-  } finally {
-    database.close();
-  }
+  return readSetting(PROVIDER_KEY);
 }
 
 export async function writeProviderRecord(value: unknown): Promise<void> {
-  const database = await openDatabase();
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(STORE, 'readwrite');
-      transaction.objectStore(STORE).put(value, PROVIDER_KEY);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error ?? new Error('Could not save the TV login.'));
-      transaction.onabort = () => reject(transaction.error ?? new Error('Saving the TV login was interrupted.'));
-    });
-  } finally {
-    database.close();
-  }
+  return writeSetting(PROVIDER_KEY, value);
 }
 
 export async function removeProviderRecord(): Promise<void> {
-  const database = await openDatabase();
-  try {
-    await new Promise<void>((resolve, reject) => {
-      const transaction = database.transaction(STORE, 'readwrite');
-      transaction.objectStore(STORE).delete(PROVIDER_KEY);
-      transaction.oncomplete = () => resolve();
-      transaction.onerror = () => reject(transaction.error ?? new Error('Could not remove the saved TV login.'));
-      transaction.onabort = () => reject(transaction.error ?? new Error('Removing the saved TV login was interrupted.'));
-    });
-  } finally {
-    database.close();
-  }
+  return removeSetting(PROVIDER_KEY);
+}
+
+export async function readAppSetting(key: string): Promise<unknown | null> {
+  return readSetting(`app:${key}`);
+}
+
+export async function writeAppSetting(key: string, value: unknown): Promise<void> {
+  return writeSetting(`app:${key}`, value);
+}
+
+export async function removeAppSetting(key: string): Promise<void> {
+  return removeSetting(`app:${key}`);
 }
